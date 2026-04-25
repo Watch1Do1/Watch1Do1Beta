@@ -8,14 +8,34 @@ interface ContactUsProps {
 
 const ContactUs: React.FC<ContactUsProps> = ({ onBack, trackEvent }) => {
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: '', email: '', subject: 'support', message: '' });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (trackEvent) {
-        trackEvent('contact_form_submission', { subject: formData.subject });
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+        const response = await fetch('/api/contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+
+        if (!response.ok) throw new Error("Transmission failed");
+
+        if (trackEvent) {
+            trackEvent('contact_form_submission', { subject: formData.subject });
+        }
+        setSubmitted(true);
+    } catch (err: any) {
+        console.error("Contact Error:", err);
+        setError("Failed to synchronize message. Please check your connection.");
+    } finally {
+        setIsSubmitting(false);
     }
-    setSubmitted(true);
   };
 
   if (submitted) {
@@ -66,6 +86,11 @@ const ContactUs: React.FC<ContactUsProps> = ({ onBack, trackEvent }) => {
 
           <form onSubmit={handleSubmit} className="space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {error && (
+                      <div className="col-span-1 md:col-span-2 bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-[10px] font-black uppercase tracking-widest text-center animate-pulse">
+                          {error}
+                      </div>
+                  )}
                   <div className="space-y-2">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Maker Name</label>
                       <input 
@@ -123,9 +148,15 @@ const ContactUs: React.FC<ContactUsProps> = ({ onBack, trackEvent }) => {
 
               <button 
                   type="submit"
-                  className="w-full bg-[#7D8FED] text-white font-black py-5 rounded-2xl hover:bg-[#6b7ae6] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 shadow-xl shadow-[#7D8FED]/20 uppercase tracking-[0.2em] text-xs"
+                  disabled={isSubmitting}
+                  className="w-full bg-[#7D8FED] text-white font-black py-5 rounded-2xl hover:bg-[#6b7ae6] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 shadow-xl shadow-[#7D8FED]/20 uppercase tracking-[0.2em] text-xs disabled:opacity-50 disabled:hover:scale-100"
               >
-                  <SendIcon className="w-5 h-5" /> Initialize Transmission
+                  {isSubmitting ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                      <SendIcon className="w-5 h-5" />
+                  )}
+                  {isSubmitting ? 'Syncing Payload...' : 'Initialize Transmission'}
               </button>
           </form>
         </div>

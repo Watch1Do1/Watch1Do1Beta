@@ -292,13 +292,57 @@ app.post('/api/auth/forgot-password', async (req, res) => {
                 from: 'Watch1Do1 <security@watch1do1.com>',
                 to: email,
                 subject: 'Maker Hub Recovery Link',
-                html: `<p>Click <a href="${resetLink}">here</a> to reset your access key.</p>` // Simplified for now
+                html: `
+                    <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #020617; color: #f8fafc; border-radius: 32px; border: 1px solid #1e293b;">
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <h1 style="color: #7D8FED; font-size: 28px; font-weight: 900; margin: 0; letter-spacing: -1px;">Security Recovery</h1>
+                            <p style="text-transform: uppercase; font-size: 9px; color: #475569; letter-spacing: 4px; margin-top: 8px; font-weight: 800;">Watch1Do1 Auth Protocol</p>
+                        </div>
+            
+                        <p style="font-size: 14px; line-height: 1.6; color: #94a3b8;">A security recovery request was initialized for your Maker Profile. Click the button below to synchronize a new access key.</p>
+                        
+                        <div style="text-align: center; margin: 40px 0;">
+                            <a href="${resetLink}" style="background: #7D8FED; color: white; padding: 18px 32px; border-radius: 16px; text-decoration: none; font-weight: 900; text-transform: uppercase; font-size: 12px; letter-spacing: 2px; box-shadow: 0 10px 20px rgba(125, 143, 237, 0.2);">Reset Access Key</a>
+                        </div>
+            
+                        <div style="background: #0f172a; padding: 20px; border-radius: 12px; border: 1px solid #1e293b; margin-top: 20px;">
+                            <p style="font-size: 11px; color: #475569; margin: 0; text-align: center;">
+                                This link will expire in 1 hour. If you did not initialize this transmission, please ignore this email.
+                            </p>
+                        </div>
+                    </div>
+                `
             });
         }
         
         console.log(`[Auth] Reset link generated for ${email}: ${resetLink}`);
         res.json({ success: true });
     } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/email/send', async (req, res) => {
+    try {
+        const { to, subject, html } = req.body;
+        const resendKey = process.env.RESEND_API_KEY;
+        
+        if (!resendKey) {
+            console.warn("[EmailAPI] RESEND_API_KEY missing. Simulating success.");
+            return res.json({ success: true, simulated: true });
+        }
+
+        const resend = new Resend(resendKey);
+        await resend.emails.send({
+            from: 'Watch1Do1 <system@watch1do1.com>',
+            to,
+            subject,
+            html
+        });
+
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error("[EmailAPI] Error:", e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -363,6 +407,48 @@ app.post('/api/admin/users/update', async (req, res) => {
         );
         res.json({ success: true });
     } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/contact', async (req, res) => {
+    try {
+        const { name, email, subject, message } = req.body;
+        const resendKey = process.env.RESEND_API_KEY;
+        
+        console.log(`[Contact] Transmission initialized from ${email}`);
+
+        if (resendKey) {
+            const resend = new Resend(resendKey);
+            await resend.emails.send({
+                from: 'Watch1Do1 <system@watch1do1.com>',
+                to: 'team@watch1do1.com',
+                replyTo: email,
+                subject: `New Workshop Inquiry: ${subject}`,
+                html: `
+                    <div style="font-family: sans-serif; background: #020617; color: #f8fafc; padding: 40px; border-radius: 24px;">
+                        <h2 style="color: #7D8FED; margin-top: 0;">New Workshop Inquiry</h2>
+                        <p style="margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 10px;">
+                            <strong>From:</strong> ${name} (&lt;${email}&gt;)<br/>
+                            <strong>Vector:</strong> ${subject}
+                        </p>
+                        <div style="background: #0f172a; padding: 25px; border-radius: 16px; border: 1px solid #1e293b;">
+                            <p style="white-space: pre-wrap; margin: 0; line-height: 1.6; color: #94a3b8;">${message}</p>
+                        </div>
+                        <p style="font-size: 11px; color: #475569; margin-top: 20px;">
+                            Watch1Do1 Automated Relay Protocol
+                        </p>
+                    </div>
+                `
+            });
+            console.log(`[Contact] Message dispatched via Resend for ${email}`);
+            res.json({ success: true });
+        } else {
+            console.warn("[Contact] RESEND_API_KEY missing. Simulating success for development.");
+            res.json({ success: true, warning: 'Simulated' });
+        }
+    } catch (e: any) {
+        console.error("[Contact] Error:", e);
         res.status(500).json({ error: e.message });
     }
 });

@@ -7,8 +7,21 @@ import type { CartItem, Product } from "../types.js";
  */
 export const emailService = {
   async sendProjectConfirmation(email: string, projectTitle: string): Promise<boolean> {
-    console.log("[Resend] Sending project confirmation to:", email);
-    return true;
+    try {
+        const response = await fetch('/api/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: email,
+                subject: 'Project Hub Active - Watch1Do1',
+                html: `<h1>Project Confirmed: ${projectTitle}</h1>` // Minimal for now, can be expanded
+            })
+        });
+        return response.ok;
+    } catch (e) {
+        console.error("Email Error:", e);
+        return false;
+    }
   },
 
   /**
@@ -47,8 +60,15 @@ export const emailService = {
             </p>
         </div>
       `;
-      // In production: await resend.emails.send({ ... })
-      return true;
+      
+      try {
+          const res = await fetch('/api/email/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: email, subject: `Project Hub Active: ${title}`, html })
+          });
+          return res.ok;
+      } catch (e) { return false; }
   },
 
   /**
@@ -79,8 +99,15 @@ export const emailService = {
             </p>
         </div>
       `;
-      // In production: await resend.emails.send({ ... })
-      return true;
+      
+      try {
+          const res = await fetch('/api/email/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: email, subject: `Project Revision Required: ${title}`, html })
+          });
+          return res.ok;
+      } catch (e) { return false; }
   },
 
   /**
@@ -110,8 +137,14 @@ export const emailService = {
         </div>
       `;
       
-      // In production, use resend.emails.send({ ... })
-      return true;
+      try {
+          const res = await fetch('/api/email/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: email, subject: 'Maker Hub Recovery Link', html })
+          });
+          return res.ok;
+      } catch (e) { return false; }
   },
 
   /**
@@ -166,8 +199,13 @@ export const emailService = {
         </div>
       `;
       
-      console.log("[Resend Dispatch Ready]");
-      await new Promise(r => setTimeout(r, 600)); 
-      return true;
+      try {
+          const res = await fetch('/api/email/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: email, subject: `Maker Payload Secured: ${title}`, html: htmlTemplate })
+          });
+          return res.ok;
+      } catch (e) { return false; }
   }
 };

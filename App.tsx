@@ -510,9 +510,23 @@ const App: React.FC = () => {
     }
     if (view === 'admin' && currentUser) return <AdminDashboard videos={videos} currentUser={currentUser} onNavigate={setView} onApprove={(id, prod, comp, epn, ins, title, status) => { 
         dbService.updateVideoStatus(id, 'published', prod, comp, ins, title); 
-        setVideos(prev => prev.map(v => Number(v.id) === Number(id) ? ({ ...v, status: 'published' as VideoStatus, products: prod, complementaryProducts: comp, epnCampId: epn, insights: ins || v.insights, title: title || v.title, creatorSubscriptionStatus: (status as any) || v.creatorSubscriptionStatus }) : v)); 
-    }} onReject={(id) => { 
+        setVideos(prev => prev.map(v => {
+            if (Number(v.id) === Number(id)) {
+                const updated = { ...v, status: 'published' as VideoStatus, products: prod, complementaryProducts: comp, epnCampId: epn, insights: ins || v.insights, title: title || v.title, creatorSubscriptionStatus: (status as any) || v.creatorSubscriptionStatus };
+                // Trigger Approval Email
+                if (updated.creatorId && !updated.creatorId.includes('ai@')) {
+                    emailService.sendApprovalEmail(updated.creatorId, updated.title, updated.products);
+                }
+                return updated;
+            }
+            return v;
+        })); 
+    }} onReject={(id, reason, note) => { 
         dbService.updateVideoStatus(id, 'rejected'); 
+        const videoToNotify = videos.find(v => Number(v.id) === Number(id));
+        if (videoToNotify && videoToNotify.creatorId && !videoToNotify.creatorId.includes('ai@')) {
+            emailService.sendRejectionEmail(videoToNotify.creatorId, videoToNotify.title, reason || 'Content Standards', note || 'Please refine your materials list.');
+        }
         setVideos(prev => prev.map(v => Number(v.id) === Number(id) ? ({ ...v, status: 'rejected' as VideoStatus }) : v)); 
     }} onDelete={(id) => { 
         setVideos(prev => prev.filter(v => Number(v.id) !== Number(id))); 
@@ -595,12 +609,25 @@ const App: React.FC = () => {
         <div className="container mx-auto px-4 py-8 animate-fade-in min-h-[80vh]">
             <div className={`flex flex-col items-center justify-center transition-all duration-700 ${hasInteraction ? 'pt-8 mb-16' : 'h-[70vh]'}`}>
                 <div className="w-full max-w-4xl text-center">
-                    <div className="flex flex-col justify-center items-center gap-8 mb-16 transform animate-scale-in">
-                        <div className="h-48 w-full max-w-[320px] relative flex items-center justify-center transition-transform hover:scale-105 cursor-default">
-                           <img src={APP_CONFIG.LOGO_PATH} alt="Watch1Do1 Logo" className="h-full w-full object-contain relative z-10" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} />
-                           <div className="logo-fallback hidden absolute inset-0 flex items-center justify-center"><SparkleIcon className="h-40 w-40 text-[#7D8FED]" /></div>
+                    <div className="flex flex-col justify-center items-center gap-10 mb-20 transform animate-scale-in">
+                        <div className="h-64 w-full max-w-[450px] relative flex items-center justify-center transition-all duration-500 hover:scale-105 cursor-default drop-shadow-[0_20px_50px_rgba(125,143,237,0.2)]">
+                           <img 
+                             src={APP_CONFIG.LOGO_PATH} 
+                             alt="Watch1Do1 Official Logo" 
+                             className="h-full w-full object-contain relative z-10" 
+                             onError={(e) => { 
+                                 e.currentTarget.style.display = 'none'; 
+                                 e.currentTarget.nextElementSibling?.classList.remove('hidden'); 
+                             }} 
+                           />
+                           <div className="logo-fallback hidden absolute inset-0 flex items-center justify-center">
+                               <SparkleIcon className="h-48 w-48 text-[#7D8FED] animate-pulse-subtle" />
+                           </div>
                         </div>
-                        <h1 className="text-7xl font-black text-white tracking-tighter">Watch1Do1</h1>
+                        <div className="text-center">
+                            <h1 className="text-8xl font-black text-white tracking-tighter mb-2 drop-shadow-2xl">Watch1Do1</h1>
+                            <p className="text-[10px] font-black text-[#7D8FED] uppercase tracking-[0.5em] opacity-80">AI Vision Workshop Terminal</p>
+                        </div>
                     </div>
                     
                     <form onSubmit={(e) => e.preventDefault()} className="relative group max-w-2xl mx-auto mb-6">
