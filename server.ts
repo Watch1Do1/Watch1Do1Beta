@@ -87,6 +87,8 @@ async function getDb() {
   } catch (error: any) {
     if (error.message?.includes('alert number 80')) {
         console.error("❌ MongoDB Firewall Error (SSL Alert 80): This usually means your MongoDB Atlas IP Whitelist (0.0.0.0/0) hasn't fully propagated yet. Please wait 2-3 minutes.");
+    } else if (error.message?.includes('bad auth') || error.code === 8000) {
+        console.error("❌ MongoDB AUTHENTICATION FAILED: The password or username in your MONGODB_URI is incorrect. If you have special characters in your password, ensure they are URL-encoded.");
     }
     console.error("❌ MongoDB Connection Disaster:", error);
     throw error;
@@ -289,7 +291,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         if (resendKey) {
             const resend = new Resend(resendKey);
             await resend.emails.send({
-                from: 'Watch1Do1 <security@watch1do1.com>',
+                from: 'Watch1Do1 <onboarding@resend.dev>',
                 to: email,
                 subject: 'Maker Hub Recovery Link',
                 html: `
@@ -334,7 +336,7 @@ app.post('/api/email/send', async (req, res) => {
 
         const resend = new Resend(resendKey);
         await resend.emails.send({
-            from: 'Watch1Do1 <system@watch1do1.com>',
+            from: 'Watch1Do1 <onboarding@resend.dev>',
             to,
             subject,
             html
@@ -420,9 +422,14 @@ app.post('/api/contact', async (req, res) => {
 
         if (resendKey) {
             const resend = new Resend(resendKey);
-            await resend.emails.send({
-                from: 'Watch1Do1 <system@watch1do1.com>',
-                to: 'team@watch1do1.com',
+            // Use onboarding@resend.dev if custom domain isn't verified yet
+            // IMPORTANT: If domain is not verified, you can only send to your own registered email!
+            const fromEmail = 'onboarding@resend.dev'; 
+            const recipientEmail = process.env.CONTACT_RECIPIENT || 'team@watch1do1.com';
+            
+            const data = await resend.emails.send({
+                from: `Watch1Do1 <${fromEmail}>`,
+                to: recipientEmail,
                 replyTo: email,
                 subject: `New Workshop Inquiry: ${subject}`,
                 html: `
@@ -441,7 +448,13 @@ app.post('/api/contact', async (req, res) => {
                     </div>
                 `
             });
-            console.log(`[Contact] Message dispatched via Resend for ${email}`);
+            
+            if ((data as any).error) {
+                console.error("[Contact] Resend API Error:", (data as any).error);
+                throw new Error((data as any).error.message || "Resend dispatch failed");
+            }
+
+            console.log(`[Contact] Message dispatched via Resend. ID: ${(data as any).id || 'N/A'}`);
             res.json({ success: true });
         } else {
             console.warn("[Contact] RESEND_API_KEY missing. Simulating success for development.");

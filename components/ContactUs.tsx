@@ -29,6 +29,7 @@ const ContactUs: React.FC<ContactUsProps> = ({ onBack, trackEvent }) => {
         if (trackEvent) {
             trackEvent('contact_form_submission', { subject: formData.subject });
         }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
         setSubmitted(true);
     } catch (err: any) {
         console.error("Contact Error:", err);
