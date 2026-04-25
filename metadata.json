@@ -1,0 +1,7 @@
+{
+  "name": "Watch1Do1 - AI Assisted Shopping for Makers",
+  "description": "A high-end platform for how-to videos where AI extracts product kits, estimates costs, and performs safety sweeps to help you build projects instantly.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
