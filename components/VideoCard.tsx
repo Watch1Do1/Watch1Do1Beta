@@ -91,9 +91,12 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onSelect, isProfileView = 
             <div className="w-6 h-6 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center overflow-hidden">
                 <UserIcon className="w-3.5 h-3.5 text-slate-500" />
             </div>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest truncate max-w-[100px]">
-                {video.creator}
-            </p>
+            <div className="flex flex-col min-w-0">
+                <span className="text-[6px] text-slate-500 font-black uppercase tracking-widest leading-none mb-0.5">Curated by</span>
+                <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest truncate max-w-[100px]">
+                    {video.creatorHandle ? `@${video.creatorHandle}` : video.creatorDisplayName || video.creator}
+                </p>
+            </div>
         </div>
         
         <div 

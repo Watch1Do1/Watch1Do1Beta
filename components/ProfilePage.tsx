@@ -6,6 +6,7 @@ import VideoCard from './VideoCard';
 
 interface ProfilePageProps {
   user: User;
+  currentUser?: User | null;
   userVideos: Video[];
   scannedVideos: Video[];
   allVideos: Video[];
@@ -21,12 +22,13 @@ interface ProfilePageProps {
 type ProfileTab = 'overview' | 'showcase' | 'favorites' | 'inventory' | 'studio' | 'scans' | 'preferences';
 
 const ProfilePage: React.FC<ProfilePageProps> = ({ 
-  user, userVideos, scannedVideos, allVideos, onAvatarChange, onVideoClick, onBack, onProfileUpdate, onManageSubscription, onShare, defaultTab = 'overview' 
+  user, currentUser, userVideos, scannedVideos, allVideos, onAvatarChange, onVideoClick, onBack, onProfileUpdate, onManageSubscription, onShare, defaultTab = 'overview' 
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrInputRef = useRef<HTMLInputElement>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user.displayName);
+  const [handle, setHandle] = useState(user.handle || '');
   const [bio, setBio] = useState(user.bio || '');
   const [activeTab, setActiveTab] = useState<ProfileTab>(defaultTab as ProfileTab);
   const [newTool, setNewTool] = useState('');
@@ -35,6 +37,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
 
   useEffect(() => {
     setDisplayName(user.displayName);
+    setHandle(user.handle || '');
     setBio(user.bio || '');
     setVenmoHandle(user.venmoHandle || '');
   }, [user]);
@@ -57,7 +60,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   };
 
   const handleSaveChanges = () => {
-    onProfileUpdate({ displayName, bio });
+    onProfileUpdate({ displayName, handle, bio });
     setIsEditing(false);
   };
 
@@ -118,9 +121,40 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
               <button onClick={handleAvatarClick} className="absolute inset-0 w-full h-full bg-black/60 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300"><CameraIcon className="w-8 h-8" /></button>
             </div>
             <div className="flex-grow text-center md:text-left">
-              <div className="flex flex-col md:flex-row items-center gap-4 mb-2"><h1 className="text-4xl font-black text-white tracking-tighter">{user.displayName}</h1><div className="flex gap-2">{user.gamificationEnabled && <span className="px-4 py-1.5 bg-[#7D8FED]/10 text-[#7D8FED] text-[10px] font-black uppercase rounded-full border border-[#7D8FED]/20 flex items-center gap-2"><MedalIcon className="w-4 h-4" /> {user.makerRank}</span>}{user.isVerifiedPartner && <span className="px-4 py-1.5 bg-emerald-500/10 text-emerald-500 text-[10px] font-black uppercase rounded-full border border-emerald-500/20 flex items-center gap-2"><ShieldIcon className="w-4 h-4" /> Verified Origin</span>}</div></div>
-              <div className="flex wrap justify-center md:justify-start gap-4 mb-6"><p className="text-slate-500 font-bold text-sm">{user.email}</p><div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 text-emerald-500 text-[9px] font-black uppercase rounded-full border border-emerald-500/20"><CheckCircleIcon className="w-3.5 h-3.5" /> 18+ Safety Verified</div></div>
-              {isEditing ? <div className="space-y-4 max-w-lg mb-8"><input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white text-sm" /><textarea value={bio} onChange={(e) => setBio(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-300 text-sm italic" rows={2} /></div> : <p className="text-slate-400 italic text-lg max-w-2xl mb-8">"{user.bio || 'Building the future, one project at a time.'}"</p>}
+              <div className="flex flex-col md:flex-row items-center gap-4 mb-2">
+                <div className="flex flex-col">
+                  <h1 className="text-4xl font-black text-white tracking-tighter">{user.displayName}</h1>
+                  {user.handle && <p className="text-[#7D8FED] font-black text-xs uppercase tracking-[0.3em] mt-1">@{user.handle}</p>}
+                </div>
+              </div>
+              <div className="flex flex-wrap justify-center md:justify-start gap-4 mb-6">
+                {currentUser?.email === user.email && <p className="text-slate-500 font-bold text-sm">{user.email}</p>}
+                <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 text-emerald-500 text-[9px] font-black uppercase rounded-full border border-emerald-500/20">
+                  <CheckCircleIcon className="w-3.5 h-3.5" /> 18+ Safety Verified
+                </div>
+              </div>
+              
+              {isEditing ? (
+                  <div className="space-y-4 max-w-lg mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-[9px] font-black uppercase text-slate-500 ml-1">Display Name</label>
+                            <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white text-sm" placeholder="Public Name" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[9px] font-black uppercase text-slate-500 ml-1">Maker Handle</label>
+                            <input type="text" value={handle} onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-[#7D8FED] text-sm font-black" placeholder="maker_handle" />
+                        </div>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[9px] font-black uppercase text-slate-500 ml-1">Maker Bio</label>
+                        <textarea value={bio} onChange={(e) => setBio(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-300 text-sm italic" rows={2} />
+                    </div>
+                  </div>
+              ) : (
+                <p className="text-slate-400 italic text-lg max-w-2xl mb-8">"{user.bio || 'Building the future, one project at a time.'}"</p>
+              )}
+              
               <div className="flex flex-wrap gap-4 justify-center md:justify-start">
                   {isEditing ? (
                       <button onClick={handleSaveChanges} className="px-8 py-4 text-[10px] font-black uppercase bg-[#7D8FED] text-white rounded-2xl shadow-xl shadow-[#7D8FED]/20 hover:scale-105 transition-all">Update Identity</button>

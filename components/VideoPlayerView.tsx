@@ -63,6 +63,13 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'done' | 'error'>('idle');
   const [revalidatingIds, setRevalidatingIds] = useState<string[]>([]);
   
+  // Reporting State
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportCategory, setReportCategory] = useState<any>('missing_tool');
+  const [reportDescription, setReportDescription] = useState('');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [reportSubmitted, setReportSubmitted] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -182,6 +189,30 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
       setTimeout(onShare, 500); // Suggest share after project completion
   };
 
+  const submitReport = async () => {
+    if (!currentUser) return;
+    setIsSubmittingReport(true);
+    try {
+        await dbService.submitReport({
+            videoId: localVideo.id,
+            projectTitle: localVideo.title,
+            reporterEmail: currentUser.email,
+            category: reportCategory,
+            description: reportDescription
+        });
+        setReportSubmitted(true);
+        setTimeout(() => {
+            setShowReportModal(false);
+            setReportSubmitted(false);
+            setReportDescription('');
+        }, 2000);
+    } catch (e) {
+        alert("Report submission failed.");
+    } finally {
+        setIsSubmittingReport(false);
+    }
+  };
+
   const buildersCount = localVideo.activeBuilders || 0;
   const hasBuiltThis = currentUser?.completedProjects.some(p => p.videoId === localVideo.id);
 
@@ -221,6 +252,13 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                             >
                                 <TrashIcon className="w-4 h-4" />
                                 Remove from Platform
+                            </button>
+                            <button 
+                                onClick={() => { setIsManageMenuOpen(false); setShowReportModal(true); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-[9px] font-black uppercase text-amber-500 hover:bg-amber-500/10 rounded-xl transition-all"
+                            >
+                                <ShieldIcon className="w-4 h-4" />
+                                Report Quality Issue
                             </button>
                             <a 
                                 href={`mailto:team@watch1do1.com?subject=Link Change Request: ${localVideo.title}&body=Video ID: ${localVideo.id}%0D%0APlease update links for the following items:`}
@@ -300,6 +338,69 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
           </div>
       )}
 
+      {showReportModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" onClick={() => !isSubmittingReport && setShowReportModal(false)}></div>
+              <div className="bg-slate-800 border border-slate-700 rounded-[3rem] p-10 max-w-lg w-full shadow-2xl relative animate-scale-in">
+                  {reportSubmitted ? (
+                      <div className="text-center py-10">
+                          <CheckCircleIcon className="w-16 h-16 text-emerald-500 mx-auto mb-6" />
+                          <h3 className="text-2xl font-black text-white tracking-tighter mb-2">Report Dispatched</h3>
+                          <p className="text-slate-400 text-sm">Our team will review this project hub immediately.</p>
+                      </div>
+                  ) : (
+                      <>
+                        <div className="flex items-center gap-3 mb-6">
+                            <ShieldIcon className="w-6 h-6 text-amber-500" />
+                            <h2 className="text-3xl font-black text-white tracking-tighter">Report Issue</h2>
+                        </div>
+                        <p className="text-slate-400 text-sm mb-8 leading-relaxed">Is there a problem with this build kit? Signal our team so we can maintain workshop quality.</p>
+                        
+                        <div className="space-y-6 mb-10">
+                            <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Report Category</label>
+                                <select 
+                                    value={reportCategory} 
+                                    onChange={(e) => setReportCategory(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white text-sm outline-none focus:border-[#7D8FED]"
+                                >
+                                    <option value="missing_tool">Missing Tool/Material</option>
+                                    <option value="incorrect_step">Incorrect Step/Instruction</option>
+                                    <option value="safety_concern">Safety Concern</option>
+                                    <option value="out_of_stock">Product Unavailable</option>
+                                    <option value="other">Other Issue</option>
+                                </select>
+                            </div>
+                            
+                            <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Description</label>
+                                <textarea 
+                                    value={reportDescription} 
+                                    onChange={(e) => setReportDescription(e.target.value)}
+                                    placeholder="Please provide details about the issue..."
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white text-sm outline-none focus:border-[#7D8FED]"
+                                    rows={4}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-4">
+                            <button onClick={() => setShowReportModal(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-500 hover:text-white transition-colors">Dismiss</button>
+                            <button 
+                                onClick={submitReport} 
+                                disabled={isSubmittingReport || !reportDescription.trim()}
+                                className="flex-[2] py-4 bg-amber-500 text-slate-900 font-black rounded-2xl uppercase tracking-widest text-[10px] shadow-xl hover:bg-amber-400 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {isSubmittingReport ? <RefreshCwIcon className="w-4 h-4 animate-spin" /> : <SendIcon className="w-4 h-4" />}
+                                {isSubmittingReport ? 'Dispatching...' : 'Submit Report'}
+                            </button>
+                        </div>
+                      </>
+                  )}
+              </div>
+          </div>
+      )}
+
       <div className="flex flex-col lg:flex-row gap-10">
         <div className="flex-grow lg:w-2/3">
           <div className="aspect-video bg-black rounded-[2.5rem] overflow-hidden shadow-2xl mb-8 relative border border-slate-700/50 group">
@@ -331,7 +432,7 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                 <div className="flex items-center gap-6 mt-4">
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center overflow-hidden">{localVideo.creatorId === 'ai@watch1do1.com' ? <SparkleIcon className="w-4 h-4 text-[#7D8FED]" /> : <UserIcon className="w-4 h-4 text-slate-500" />}</div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">by <span className="text-[#7D8FED]">{localVideo.creator}</span></p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">curated by <span className="text-[#7D8FED]">{localVideo.creatorId === 'ai@watch1do1.com' ? 'Watch1Do1 AI' : (localVideo.creatorDisplayName || localVideo.creator || 'Maker')}</span></p>
                         {localVideo.creatorSubscriptionStatus && localVideo.creatorSubscriptionStatus !== 'Free' && (
                             <div className="flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[7px] font-black text-amber-500 uppercase tracking-widest">
                                 <MedalIcon className="w-2.5 h-2.5" /> Supported Creator

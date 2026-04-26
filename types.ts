@@ -136,6 +136,8 @@ export interface Video {
   videoUrl: string;
   thumbnailUrl: string;
   sourceImageUrl?: string;
+  creatorHandle?: string;
+  creatorDisplayName?: string;
   products: Product[];
   complementaryProducts: Product[];
   insights: ProjectInsights;
@@ -200,6 +202,7 @@ export interface User {
   ownedTools?: string[];
   tipQrUrl?: string;
   venmoHandle?: string;
+  handle?: string; // Unique maker handle (e.g. @maker_123)
   // Enterprise Fields
   company?: string;
   partnerId?: string;
@@ -212,6 +215,40 @@ export interface User {
 
 export interface CartItem extends Product {
   quantity: number;
+}
+
+export type ReportCategory = 'missing_tool' | 'incorrect_step' | 'safety_concern' | 'out_of_stock' | 'other';
+export type ReportStatus = 'pending' | 'resolved' | 'dismissed';
+
+export interface ProjectReport {
+  id: string;
+  videoId: number;
+  projectTitle: string;
+  reporterEmail: string;
+  category: ReportCategory;
+  description: string;
+  timestamp: string;
+  status: ReportStatus;
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  userId: string;
+  userEmail: string;
+  metadata: Record<string, any>;
+  timestamp: string;
+}
+
+export interface SystemStatus {
+  dbConnected: boolean;
+  mongoUriOk: boolean;
+  stripeOk: boolean;
+  resendOk: boolean;
+  ebayOk: boolean;
+  geminiOk: boolean;
+  uptime: number;
+  version: string;
 }
 
 export const UploadType = {

@@ -197,5 +197,36 @@ export const dbService = {
         body: JSON.stringify(user),
     });
     return !!res;
+  },
+
+  async submitReport(report: any): Promise<boolean> {
+    const res = await apiFetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(report),
+    });
+    return !!res;
+  },
+
+  async getReports(): Promise<any[]> {
+    const data = await apiFetch<any[]>('/api/reports');
+    return data || [];
+  },
+
+  async resolveReport(reportId: string): Promise<boolean> {
+    const res = await apiFetch(`/api/reports/${reportId}/resolve`, {
+        method: 'POST'
+    });
+    return !!res;
+  },
+
+  async getAuditTrail(): Promise<any[]> {
+    const data = await apiFetch<any[]>('/api/admin/audit');
+    return data || [];
+  },
+
+  async getSystemStatus(): Promise<any> {
+    const data = await apiFetch<any>('/api/admin/status');
+    return data || { db: 'disconnected', server: 'unknown', uptime: 0 };
   }
 };

@@ -95,6 +95,31 @@ async function getDb() {
   }
 }
 
+// Helper: Generate a unique maker handle
+function generateHandle(email: string) {
+  const base = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+  const suffix = Math.floor(1000 + Math.random() * 9000);
+  return `${base}_${suffix}`;
+}
+
+// Helper: Log Audit Entry
+async function logAudit(action: string, email: string, metadata: any = {}) {
+  try {
+    const database = await getDb();
+    const user = await database.collection("users").findOne({ email: email.toLowerCase() });
+    await database.collection("audit_logs").insertOne({
+      id: crypto.randomUUID(),
+      action,
+      userId: user?._id?.toString() || 'unknown',
+      userEmail: email,
+      metadata,
+      timestamp: new Date().toISOString()
+    });
+  } catch (e) {
+    console.error("[Audit Log Error]", e);
+  }
+}
+
 // STRIPE ROUTES
 app.post('/api/stripe/create-checkout-session', async (req, res) => {
   try {
@@ -735,10 +760,114 @@ app.post('/api/users/upsert', async (req, res) => {
       { $set: userData },
       { upsert: true }
     );
+    await logAudit('user_upsert', userData.email.toLowerCase(), { isAdmin: userData.isAdmin });
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+app.post('/api/users/update-profile', async (req, res) => {
+  try {
+    const { email, displayName, handle, bio, avatarUrl } = req.body;
+    const database = await getDb();
+    
+    // Check if handle is taken by someone else
+    if (handle) {
+        const existing = await database.collection("users").findOne({ 
+            handle: handle.toLowerCase(), 
+            email: { $ne: email.toLowerCase() } 
+        });
+        if (existing) {
+            return res.status(400).json({ error: "Handle already taken" });
+        }
+    }
+
+    const result = await database.collection("users").updateOne(
+      { email: email.toLowerCase() },
+      { $set: { 
+          displayName, 
+          handle: handle?.toLowerCase(), 
+          bio, 
+          avatarUrl,
+          updatedAt: new Date().toISOString()
+        } }
+    );
+
+    await logAudit('profile_update', email, { displayName, handle });
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// REPORTING ROUTES
+app.post('/api/reports', async (req, res) => {
+  try {
+    const database = await getDb();
+    const reportData = {
+        ...req.body,
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        status: 'pending'
+    };
+    const result = await database.collection("reports").insertOne(reportData);
+    await logAudit('project_reported', reportData.reporterEmail, { videoId: reportData.videoId, category: reportData.category });
+    res.json({ success: true, id: reportData.id });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/admin/reports', async (req, res) => {
+    try {
+        const database = await getDb();
+        const reports = await database.collection("reports").find({}).sort({ timestamp: -1 }).toArray();
+        res.json(reports);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.patch('/api/admin/reports/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        const database = await getDb();
+        await database.collection("reports").updateOne({ id }, { $set: { status } });
+        res.json({ success: true });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/audit-logs', async (req, res) => {
+    try {
+        const database = await getDb();
+        const logs = await database.collection("audit_logs").find({}).sort({ timestamp: -1 }).limit(100).toArray();
+        res.json(logs);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/admin/system-status', async (req, res) => {
+    try {
+        const database = await getDb();
+        const status = {
+            dbConnected: !!database,
+            mongoUriOk: !!process.env.MONGODB_URI,
+            stripeOk: !!process.env.STRIPE_SECRET_KEY,
+            resendOk: !!process.env.RESEND_API_KEY,
+            ebayOk: !!process.env.EBAY_CLIENT_ID,
+            geminiOk: !!process.env.GEMINI_API_KEY,
+            uptime: process.uptime(),
+            version: "1.2.0"
+        };
+        res.json(status);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.get('/api/users', async (req, res) => {
