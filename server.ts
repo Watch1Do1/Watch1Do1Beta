@@ -46,6 +46,11 @@ const getStripe = () => {
 
 app.use(express.json({ limit: '50mb' })); // Increase limit for images
 
+// Health Check
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', environment: process.env.VERCEL ? 'vercel' : 'local', db: !!db });
+});
+
 // MongoDB Connection Setup
 const MONGODB_URI = process.env.MONGODB_URI || '';
 const DB_NAME = "watch1do1";

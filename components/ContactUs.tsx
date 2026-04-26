@@ -24,7 +24,10 @@ const ContactUs: React.FC<ContactUsProps> = ({ onBack, trackEvent }) => {
             body: JSON.stringify(formData)
         });
 
-        if (!response.ok) throw new Error("Transmission failed");
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || "Transmission failed");
+        }
 
         if (trackEvent) {
             trackEvent('contact_form_submission', { subject: formData.subject });
