@@ -67,8 +67,15 @@ export const emailService = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ to: email, subject: `Project Hub Active: ${title}`, html })
           });
-          return res.ok;
-      } catch (e) { return false; }
+          if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || `Transmission failed (${res.status})`);
+          }
+          return true;
+      } catch (e) { 
+          console.error("[EmailService] Approval send failed:", e);
+          throw e; 
+      }
   },
 
   /**
@@ -106,8 +113,15 @@ export const emailService = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ to: email, subject: `Project Revision Required: ${title}`, html })
           });
-          return res.ok;
-      } catch (e) { return false; }
+          if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || `Transmission failed (${res.status})`);
+          }
+          return true;
+      } catch (e) { 
+          console.error("[EmailService] Rejection send failed:", e);
+          throw e; 
+      }
   },
 
   /**
@@ -143,8 +157,15 @@ export const emailService = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ to: email, subject: 'Maker Hub Recovery Link', html })
           });
-          return res.ok;
-      } catch (e) { return false; }
+          if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || `Transmission failed (${res.status})`);
+          }
+          return true;
+      } catch (e) { 
+          console.error("[EmailService] Password reset send failed:", e);
+          throw e; 
+      }
   },
 
   /**
@@ -205,7 +226,14 @@ export const emailService = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ to: email, subject: `Maker Payload Secured: ${title}`, html: htmlTemplate })
           });
-          return res.ok;
-      } catch (e) { return false; }
+          if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || `Transmission failed (${res.status})`);
+          }
+          return true;
+      } catch (e) { 
+          console.error("[EmailService] Send failed:", e);
+          throw e; 
+      }
   }
 };

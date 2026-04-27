@@ -1,9 +1,10 @@
 {
   "version": 2,
   "functions": {
-    "api/index.ts": {
-      "runtime": "@vercel/node",
-      "memory": 1024
+    "api/**/*.ts": {
+      "runtime": "nodejs20.x",
+      "memory": 1024,
+      "maxDuration": 10
     }
   },
   "rewrites": [
