@@ -16,6 +16,10 @@ const AboutUs: React.FC<{onBack: () => void}> = ({ onBack }) => {
           </p>
         </header>
 
+        <p className="text-base text-slate-500 font-medium leading-relaxed max-w-2xl mx-auto text-center italic border-y border-slate-800/30 py-10">
+          The name Watch1Do1 comes from a long‑standing teaching principle: observe carefully, execute deliberately, and share responsibly. We believe learning isn’t complete until understanding turns into action — and action into knowledge that can be passed on.
+        </p>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="bg-slate-800 p-8 rounded-[2rem] border border-slate-700">
             <SearchIcon className="w-10 h-10 text-[#7D8FED] mb-6" />
@@ -40,9 +44,9 @@ const AboutUs: React.FC<{onBack: () => void}> = ({ onBack }) => {
                 Watch1Do1 started as a simple checklist tool and has evolved into a high-performance AI assistant for carpenters, engineers, artists, and DIY enthusiasts.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
-                <div className="bg-slate-800 px-6 py-3 rounded-full border border-slate-700 text-xs font-black uppercase tracking-widest text-slate-300">1.2M+ Projects Analyzed</div>
-                <div className="bg-slate-800 px-6 py-3 rounded-full border border-slate-700 text-xs font-black uppercase tracking-widest text-slate-300">45k+ Verified Toolkits</div>
-                <div className="bg-slate-800 px-6 py-3 rounded-full border border-slate-700 text-xs font-black uppercase tracking-widest text-slate-300">Zero Build Failures</div>
+                <div className="bg-slate-800 px-6 py-3 rounded-full border border-slate-700 text-xs font-black uppercase tracking-widest text-slate-300">Projects Analyzed</div>
+                <div className="bg-slate-800 px-6 py-3 rounded-full border border-slate-700 text-xs font-black uppercase tracking-widest text-slate-300">Verified Toolkits</div>
+                <div className="bg-slate-800 px-6 py-3 rounded-full border border-slate-700 text-xs font-black uppercase tracking-widest text-slate-300">Reduced Build Failures</div>
             </div>
         </section>
       </div>
