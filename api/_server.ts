@@ -17,12 +17,12 @@ import {
   searchSpecificProduct,
   revalidateProductAvailability,
   generateDeepDiveProducts
-} from './services/geminiService.js';
+} from '../services/geminiService.js';
 import { 
   searchEbayItems, 
   getEbayItem, 
   constructEbayAffiliateUrl 
-} from './services/ebayBrowseService.js';
+} from '../services/ebayBrowseService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
