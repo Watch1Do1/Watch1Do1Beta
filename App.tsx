@@ -610,7 +610,7 @@ const App: React.FC = () => {
             <div className={`flex flex-col items-center justify-center transition-all duration-700 ${hasInteraction ? 'pt-8 mb-16' : 'h-[70vh]'}`}>
                 <div className="w-full max-w-4xl text-center">
                     <div className="flex flex-col justify-center items-center gap-6 sm:gap-10 mb-12 sm:mb-20 transform animate-scale-in">
-                        <div className="h-40 sm:h-52 md:h-64 w-full max-w-[450px] relative flex items-center justify-center transition-all duration-500 hover:scale-105 cursor-default drop-shadow-[0_20px_50px_rgba(125,143,237,0.2)]">
+                        <div className="h-32 sm:h-52 md:h-64 w-full max-w-[450px] relative flex items-center justify-center transition-all duration-500 hover:scale-105 cursor-default drop-shadow-[0_20px_50px_rgba(125,143,237,0.2)]">
                            <img 
                              src={APP_CONFIG.LOGO_PATH} 
                              alt="Watch1Do1 Official Logo" 
@@ -621,12 +621,12 @@ const App: React.FC = () => {
                              }} 
                            />
                            <div className="logo-fallback hidden absolute inset-0 flex items-center justify-center">
-                               <SparkleIcon className="h-32 sm:h-40 md:h-48 w-32 sm:w-40 md:w-48 text-[#7D8FED] animate-pulse-subtle" />
+                               <SparkleIcon className="h-24 sm:h-40 md:h-48 w-24 sm:w-40 md:w-48 text-[#7D8FED] animate-pulse-subtle" />
                            </div>
                         </div>
                         <div className="text-center">
-                            <h1 className="text-5xl sm:text-7xl md:text-8xl font-black text-white tracking-tighter mb-2 drop-shadow-2xl">Watch1Do1</h1>
-                            <p className="text-[8px] sm:text-[10px] font-black text-[#7D8FED] uppercase tracking-[0.3em] sm:tracking-[0.5em] opacity-80">AI Vision Workshop Terminal</p>
+                            <h1 className="text-4xl sm:text-7xl md:text-8xl font-black text-white tracking-tighter mb-2 drop-shadow-2xl">Watch1Do1</h1>
+                            <p className="text-[8px] sm:text-[10px] font-black text-[#7D8FED] uppercase tracking-[0.2em] sm:tracking-[0.5em] opacity-80">AI Vision Workshop Terminal</p>
                         </div>
                     </div>
                     
