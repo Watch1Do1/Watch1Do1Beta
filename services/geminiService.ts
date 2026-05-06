@@ -164,7 +164,12 @@ const routeProductDiscovery = async (p: any): Promise<Product> => {
 }
 
 export const generateProductsFromText = async (text: string, category?: ProjectCategory): Promise<Product[]> => {
-  if (!isServer) {
+  const apiKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null;
+  
+  // Follow the skill directive: Always call Gemini API from the frontend.
+  // We only fallback to server if we are actually on the server already.
+  if (!apiKey && !isServer) {
+    console.warn("[Gemini Service] API Key missing on client, falling back to server proxy...");
     const res = await fetch('/api/ai/products/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -174,7 +179,7 @@ export const generateProductsFromText = async (text: string, category?: ProjectC
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || '' });
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Act as a Professional Consultant for the category: "${category || 'General'}". 
@@ -189,12 +194,23 @@ export const generateProductsFromText = async (text: string, category?: ProjectC
     return Promise.all(raw.map((p: any) => routeProductDiscovery(p)));
   } catch (e) {
     console.error("[Vision AI] Text Analysis Error:", e);
+    // If client-side fails and we aren't on server, try one last time via proxy if we haven't already
+    if (!isServer && apiKey) {
+        const res = await fetch('/api/ai/products/text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, category })
+        });
+        return res.json();
+    }
     return [];
   }
 };
 
 export const generateProductsFromImages = async (base64Images: string[], mimeType: string, category?: ProjectCategory): Promise<Product[]> => {
-  if (!isServer) {
+  const apiKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null;
+
+  if (!apiKey && !isServer) {
     const res = await fetch('/api/ai/products/images', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -204,7 +220,7 @@ export const generateProductsFromImages = async (base64Images: string[], mimeTyp
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || '' });
     const parts = base64Images.map(data => ({ inlineData: { data, mimeType } }));
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -217,12 +233,22 @@ export const generateProductsFromImages = async (base64Images: string[], mimeTyp
     return Promise.all(raw.map((p: any) => routeProductDiscovery(p)));
   } catch (e) {
     console.error("[Vision AI] Image Analysis Error:", e);
+    if (!isServer && apiKey) {
+        const res = await fetch('/api/ai/products/images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ images: base64Images, mimeType, category })
+        });
+        return res.json();
+    }
     return [];
   }
 };
 
 export const generateProductsFromUrl = async (url: string, category?: ProjectCategory): Promise<Product[]> => {
-  if (!isServer) {
+  const apiKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null;
+
+  if (!apiKey && !isServer) {
     const res = await fetch('/api/ai/products/url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -233,7 +259,7 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
 
   console.log(`[Vision AI] Starting URL Analysis for: ${url} (Category: ${category})`);
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || '' });
     
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -258,7 +284,15 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
     console.log(`[Vision AI] urlContext empty, falling back to text analysis...`);
     return generateProductsFromText(url, category);
   } catch (e) {
-    console.error("[Vision AI] URL Analysis Error:", e);
+    console.warn("[Vision AI] URL Analysis Error on client, trying server proxy backup...");
+    if (!isServer) {
+        const res = await fetch('/api/ai/products/url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, category })
+        });
+        if (res.ok) return res.json();
+    }
     return generateProductsFromText(url, category);
   }
 };

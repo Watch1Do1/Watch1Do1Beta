@@ -759,16 +759,34 @@ app.get('/api/users/:email', async (req, res) => {
 app.post('/api/users/upsert', async (req, res) => {
   try {
     const { password: _, resetToken: __, resetTokenExpiry: ___, ...userData } = req.body;
+    
+    if (!userData.email) {
+      console.error("[User Upsert] Error: Missing email in request body", req.body);
+      return res.status(400).json({ error: "Missing email identity" });
+    }
+
+    console.log(`[User Upsert] Processing for: ${userData.email}`);
     const database = await getDb();
+    
     const result = await database.collection("users").updateOne(
       { email: userData.email.toLowerCase() },
       { $set: userData },
       { upsert: true }
     );
-    await logAudit('user_upsert', userData.email.toLowerCase(), { isAdmin: userData.isAdmin });
+    
+    try {
+      await logAudit('user_upsert', userData.email.toLowerCase(), { isAdmin: userData.isAdmin });
+    } catch (auditError) {
+      console.warn("[User Upsert] Audit logging failed, but upsert succeeded", auditError);
+    }
+
     res.json(result);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    console.error("[User Upsert] Fatal Error:", e);
+    res.status(500).json({ 
+      error: e.message,
+      details: "Ensure MONGODB_URI is correctly configured in your environment variables."
+    });
   }
 });
 
