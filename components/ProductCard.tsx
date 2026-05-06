@@ -167,8 +167,8 @@ const ProductCard: React.FC<ProductCardProps> = ({
             )}
           </div>
           
-          <p className="text-sm font-bold text-white truncate leading-none mb-1.5">{product.name}</p>
-          <p className="text-[10px] text-slate-500 line-clamp-1 leading-tight mb-2">{product.description}</p>
+          <p className="text-sm font-bold text-white leading-tight mb-1.5">{product.name}</p>
+          <p className="text-[10px] text-slate-500 line-clamp-2 leading-tight mb-2 hover:line-clamp-none transition-all">{product.description}</p>
           
           <div className="flex items-center justify-between mt-auto pt-1">
               <div className="flex flex-col">

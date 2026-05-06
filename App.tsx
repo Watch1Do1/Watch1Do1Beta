@@ -119,7 +119,7 @@ const App: React.FC = () => {
   const [planningKit, setPlanningKit] = useState<CartItem[]>([]);
   const [isKitPanelOpen, setKitPanelOpen] = useState(false);
   const [xpNotification, setXpNotification] = useState<{ amount: number; label: string } | null>(null);
-  const [sourcingRedirectUrl, setSourcingRedirectUrl] = useState<string | null>(null);
+  const [sourcingKit, setSourcingKit] = useState<CartItem[]>([]);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [pendingAnalysis, setPendingAnalysis] = useState<{ type: UploadType, val: File[] | string, cat: ProjectCategory } | null>(null);
   
@@ -444,39 +444,36 @@ const App: React.FC = () => {
         startRotatingLoadingMessages("Standardizing Affiliate Routing...");
         
         setTimeout(() => {
-            const firstItem = kit[0];
-            const creatorIsSubscribed = selectedVideo?.creatorSubscriptionStatus && selectedVideo.creatorSubscriptionStatus !== 'Free';
-            
-            // Platform Fallback campid
-            const platformCampId = '5339014523';
-            const campId = creatorIsSubscribed ? (selectedVideo?.epnCampId || platformCampId) : platformCampId;
-            
-            // Ensure affiliate attribution - Prioritize creator link ONLY if subscribed
-            let handoffUrl = (firstItem.isCreatorDeclared && firstItem.creatorAffiliateUrl && creatorIsSubscribed) 
-              ? firstItem.creatorAffiliateUrl 
-              : firstItem.purchaseUrl;
-            
-            if (handoffUrl.includes('ebay.com')) {
-                // If creator is not subscribed, we strip any existing campid or customid to 'neutralize' it for them, 
-                // or we use the platform campid to support the app's free tier.
-                const urlObj = new URL(handoffUrl);
-                if (!creatorIsSubscribed) {
-                    urlObj.searchParams.set('campid', platformCampId);
-                    urlObj.searchParams.set('customid', 'w1d1_free_tier');
-                } else {
-                    if (!urlObj.searchParams.has('campid')) {
-                        urlObj.searchParams.set('campid', campId);
+            const processedKit = kit.map(item => {
+                const creatorIsSubscribed = selectedVideo?.creatorSubscriptionStatus && selectedVideo.creatorSubscriptionStatus !== 'Free';
+                const platformCampId = '5339014523';
+                const campId = creatorIsSubscribed ? (selectedVideo?.epnCampId || platformCampId) : platformCampId;
+                
+                let handoffUrl = (item.isCreatorDeclared && item.creatorAffiliateUrl && creatorIsSubscribed) 
+                  ? item.creatorAffiliateUrl 
+                  : item.purchaseUrl;
+                
+                if (handoffUrl.includes('ebay.com')) {
+                    const urlObj = new URL(handoffUrl);
+                    if (!creatorIsSubscribed) {
+                        urlObj.searchParams.set('campid', platformCampId);
+                        urlObj.searchParams.set('customid', 'w1d1_free_tier');
+                    } else {
+                        if (!urlObj.searchParams.has('campid')) {
+                            urlObj.searchParams.set('campid', campId);
+                        }
+                        urlObj.searchParams.set('customid', 'w1d1_kit_source');
                     }
-                    urlObj.searchParams.set('customid', 'w1d1_kit_source');
+                    urlObj.searchParams.set('toolid', '10001');
+                    handoffUrl = urlObj.toString();
                 }
-                urlObj.searchParams.set('toolid', '10001');
-                handoffUrl = urlObj.toString();
-            }
+                return { ...item, purchaseUrl: handoffUrl };
+            });
             
-            setSourcingRedirectUrl(handoffUrl);
+            setSourcingKit(processedKit);
             setIsLoading(false);
             stopRotatingLoadingMessages();
-            trackEvent('source_redirect', { itemCount: kit.length, primaryRetailer: firstItem.retailer, creatorSubscribed: creatorIsSubscribed });
+            trackEvent('source_redirect', { itemCount: kit.length, creatorSubscribed: !!selectedVideo?.creatorSubscriptionStatus });
         }, 1200);
     }
   };
@@ -800,7 +797,7 @@ const App: React.FC = () => {
         )}
         {isShareModalOpen && shareData && <ShareModal video={shareData.video} isCreatorView={shareData.isCreator} onClose={() => setShareModalOpen(false)} />}
         
-        {sourcingRedirectUrl && <SourcingRedirectModal url={sourcingRedirectUrl} itemCount={planningKit.length} onClose={() => setSourcingRedirectUrl(null)} />}
+        {sourcingKit.length > 0 && <SourcingRedirectModal items={sourcingKit} onClose={() => setSourcingKit([])} />}
         {isEmailModalOpen && <EmailKitModal items={planningKit} projectTitle={selectedVideo?.title || "Watch1Do1 Project"} onClose={() => setIsEmailModalOpen(false)} onSend={async (email) => { await emailService.sendEmailKit(email, selectedVideo?.title || "Kit", planningKit); }} />}
 
         {xpNotification && (

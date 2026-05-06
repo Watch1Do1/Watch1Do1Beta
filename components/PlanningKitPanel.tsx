@@ -97,11 +97,20 @@ const PlanningKitPanel: React.FC<PlanningKitPanelProps> = ({
                         <img src={item.imageUrl} alt={item.name} className="w-16 h-16 object-cover rounded-xl" />
                         <div className="flex-grow min-w-0">
                             <div className="flex justify-between items-start">
-                                <div className="min-w-0">
+                                <div className="min-w-0 pr-6 relative">
                                     <p className="text-xs font-black text-white truncate">{item.name}</p>
                                     {item.isCreatorDeclared && (
                                         <span className="text-[7px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 mt-1 inline-block">Creator Declared</span>
                                     )}
+                                    <a 
+                                      href={item.purchaseUrl} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer" 
+                                      className="absolute -right-1 top-0 p-1 text-slate-500 hover:text-[#7D8FED] transition-colors"
+                                      title="View Product"
+                                    >
+                                      <ExternalLinkIcon className="w-3.5 h-3.5" />
+                                    </a>
                                 </div>
                                 <button onClick={() => onRemoveItem(item.id)} aria-label="Remove item" className="text-slate-600 hover:text-rose-500 p-1 transition-colors flex-shrink-0"><TrashIcon className="w-3.5 h-3.5" /></button>
                             </div>
