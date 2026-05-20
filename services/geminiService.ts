@@ -163,13 +163,74 @@ const routeProductDiscovery = async (p: any): Promise<Product> => {
     return result;
 }
 
+class ServerProxyChat {
+  private history: { role: 'user' | 'model'; text: string }[] = [];
+  private videoTitle: string;
+  private products: Product[];
+  private category?: ProjectCategory;
+
+  constructor(videoTitle: string, products: Product[], category?: ProjectCategory) {
+    this.videoTitle = videoTitle;
+    this.products = products;
+    this.category = category;
+  }
+
+  async *sendMessageStream({ message }: { message: string }) {
+    this.history.push({ role: 'user', text: message });
+
+    const response = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        videoTitle: this.videoTitle,
+        products: this.products,
+        category: this.category,
+        message: message,
+        history: this.history.slice(0, -1)
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Chat failed with status ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body reader or stream interface supported");
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let accumulatedModelText = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const chunk = JSON.parse(jsonStr);
+            accumulatedModelText += chunk.text || '';
+            yield chunk;
+          } catch (e) {
+            console.error("Failed to parse chat chunk:", e);
+          }
+        }
+      }
+    }
+
+    this.history.push({ role: 'model', text: accumulatedModelText });
+  }
+}
+
 export const generateProductsFromText = async (text: string, category?: ProjectCategory): Promise<Product[]> => {
-  const apiKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null;
-  
-  // Follow the skill directive: Always call Gemini API from the frontend.
-  // We only fallback to server if we are actually on the server already.
-  if (!apiKey && !isServer) {
-    console.warn("[Gemini Service] API Key missing on client, falling back to server proxy...");
+  if (!isServer) {
     const res = await fetch('/api/ai/products/text', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -179,7 +240,7 @@ export const generateProductsFromText = async (text: string, category?: ProjectC
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || '' });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Act as a Professional Consultant for the category: "${category || 'General'}". 
@@ -194,23 +255,12 @@ export const generateProductsFromText = async (text: string, category?: ProjectC
     return Promise.all(raw.map((p: any) => routeProductDiscovery(p)));
   } catch (e) {
     console.error("[Vision AI] Text Analysis Error:", e);
-    // If client-side fails and we aren't on server, try one last time via proxy if we haven't already
-    if (!isServer && apiKey) {
-        const res = await fetch('/api/ai/products/text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, category })
-        });
-        return res.json();
-    }
     return [];
   }
 };
 
 export const generateProductsFromImages = async (base64Images: string[], mimeType: string, category?: ProjectCategory): Promise<Product[]> => {
-  const apiKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null;
-
-  if (!apiKey && !isServer) {
+  if (!isServer) {
     const res = await fetch('/api/ai/products/images', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -220,7 +270,7 @@ export const generateProductsFromImages = async (base64Images: string[], mimeTyp
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || '' });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const parts = base64Images.map(data => ({ inlineData: { data, mimeType } }));
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -233,22 +283,12 @@ export const generateProductsFromImages = async (base64Images: string[], mimeTyp
     return Promise.all(raw.map((p: any) => routeProductDiscovery(p)));
   } catch (e) {
     console.error("[Vision AI] Image Analysis Error:", e);
-    if (!isServer && apiKey) {
-        const res = await fetch('/api/ai/products/images', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ images: base64Images, mimeType, category })
-        });
-        return res.json();
-    }
     return [];
   }
 };
 
 export const generateProductsFromUrl = async (url: string, category?: ProjectCategory): Promise<Product[]> => {
-  const apiKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null;
-
-  if (!apiKey && !isServer) {
+  if (!isServer) {
     const res = await fetch('/api/ai/products/url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -259,7 +299,7 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
 
   console.log(`[Vision AI] Starting URL Analysis for: ${url} (Category: ${category})`);
   try {
-    const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || '' });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -285,14 +325,6 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
     return generateProductsFromText(url, category);
   } catch (e) {
     console.warn("[Vision AI] URL Analysis Error on client, trying server proxy backup...");
-    if (!isServer) {
-        const res = await fetch('/api/ai/products/url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, category })
-        });
-        if (res.ok) return res.json();
-    }
     return generateProductsFromText(url, category);
   }
 };
@@ -344,7 +376,10 @@ export const generateV3ProjectInsights = async (title: string, products: Product
   }
 };
 
-export const createProjectAssistantChat = (videoTitle: string, products: Product[], category?: ProjectCategory): Chat => {
+export const createProjectAssistantChat = (videoTitle: string, products: Product[], category?: ProjectCategory): any => {
+  if (!isServer) {
+    return new ServerProxyChat(videoTitle, products, category);
+  }
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   return ai.chats.create({
     model: 'gemini-3.1-pro-preview', // Upgraded to Pro for expert-level advice

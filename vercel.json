@@ -1,7 +1,10 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.ts" },
+    { "source": "/api/(.*)", "destination": "/api/_server.ts" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  ],
+  "functions": {
+    "api/_server.ts": { "runtime": "nodejs20.x" }
+  }
 }

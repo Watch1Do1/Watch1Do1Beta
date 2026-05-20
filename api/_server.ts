@@ -16,7 +16,8 @@ import {
   generateV3ProjectInsights,
   searchSpecificProduct,
   revalidateProductAvailability,
-  generateDeepDiveProducts
+  generateDeepDiveProducts,
+  createProjectAssistantChat
 } from '../services/geminiService.js';
 import { 
   searchEbayItems, 
@@ -574,6 +575,42 @@ app.post('/api/ai/revalidate', async (req, res) => {
     res.json(update);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const { videoTitle, products, message, history } = req.body;
+
+    const chatInstance = createProjectAssistantChat(videoTitle, products);
+
+    if (history && history.length > 0) {
+      chatInstance.history = history.map((h: any) => ({
+        role: h.role === 'model' ? 'model' : 'user',
+        parts: [{ text: h.text }]
+      }));
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const stream = await chatInstance.sendMessageStream({ message });
+
+    for await (const chunk of stream) {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    }
+
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (e: any) {
+    console.error("[Server Chat Error]:", e);
+    if (!res.headersSent) {
+      res.status(500).json({ error: e.message });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+      res.end();
+    }
   }
 });
 
