@@ -147,6 +147,7 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setCurrentUser(null);
+    localStorage.removeItem('w1d1_last_user');
     handleNavigateHome();
   };
 

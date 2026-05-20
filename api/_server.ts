@@ -758,7 +758,7 @@ app.get('/api/users/:email', async (req, res) => {
 
 app.post('/api/users/upsert', async (req, res) => {
   try {
-    const { password: _, resetToken: __, resetTokenExpiry: ___, ...userData } = req.body;
+    const { password: _, resetToken: __, resetTokenExpiry: ___, _id, ...userData } = req.body;
     
     if (!userData.email) {
       console.error("[User Upsert] Error: Missing email in request body", req.body);

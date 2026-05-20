@@ -157,24 +157,29 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
               
               <div className="flex flex-wrap gap-4 justify-center md:justify-start">
                   {isEditing ? (
-                      <button onClick={handleSaveChanges} className="px-8 py-4 text-[10px] font-black uppercase bg-[#7D8FED] text-white rounded-2xl shadow-xl shadow-[#7D8FED]/20 hover:scale-105 transition-all">Update Identity</button>
+                      <>
+                          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSaveChanges(); }} className="px-8 py-4 text-[10px] font-black uppercase bg-[#7D8FED] text-white rounded-2xl shadow-xl shadow-[#7D8FED]/20 hover:scale-105 transition-all">Update Identity</button>
+                          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(false); }} className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 transition-all">Cancel</button>
+                      </>
                   ) : (
-                      <button onClick={() => setIsEditing(true)} className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 transition-all">Edit Hub Profile</button>
+                      <>
+                          <button onClick={() => setIsEditing(true)} className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 transition-all">Edit Hub Profile</button>
+                          <div className="group relative">
+                            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onManageSubscription(); }} className={`px-8 py-4 text-[10px] font-black uppercase rounded-2xl transition-all shadow-xl flex items-center gap-3 ${user.subscriptionStatus !== 'Free' ? 'bg-[#7D8FED]/10 text-[#7D8FED] border border-[#7D8FED]/20 overflow-hidden' : 'bg-amber-500 text-slate-900 shadow-amber-500/10 hover:bg-amber-400'}`}>
+                                {user.subscriptionStatus !== 'Free' && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>}
+                                <TrophyIcon className={`w-4 h-4 ${user.subscriptionStatus !== 'Free' ? 'text-[#7D8FED]' : 'text-slate-900'}`} />
+                                <span>{user.subscriptionStatus === 'Free' ? 'Upgrade — Save 30%' : `${user.subscriptionStatus} Support Active`}</span>
+                            </button>
+                          </div>
+                      </>
                   )}
-                  <div className="group relative">
-                    <button onClick={onManageSubscription} className={`px-8 py-4 text-[10px] font-black uppercase rounded-2xl transition-all shadow-xl flex items-center gap-3 ${user.subscriptionStatus !== 'Free' ? 'bg-[#7D8FED]/10 text-[#7D8FED] border border-[#7D8FED]/20 overflow-hidden' : 'bg-amber-500 text-slate-900 shadow-amber-500/10 hover:bg-amber-400'}`}>
-                        {user.subscriptionStatus !== 'Free' && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>}
-                        <TrophyIcon className={`w-4 h-4 ${user.subscriptionStatus !== 'Free' ? 'text-[#7D8FED]' : 'text-slate-900'}`} />
-                        <span>{user.subscriptionStatus === 'Free' ? 'Upgrade — Save 30%' : `${user.subscriptionStatus} Support Active`}</span>
-                    </button>
-                  </div>
               </div>
             </div>
           </div>
         </div>
 
         <div className="flex items-center space-x-2 p-1.5 bg-slate-800 rounded-2xl w-full max-w-5xl mb-12 border border-slate-700 overflow-x-auto no-scrollbar snap-x snap-mandatory">
-            <TabButton tab="overview" label="Wallet" icon={DollarSignIcon} />
+            <TabButton tab="overview" label="Wallet & Progression" icon={DollarSignIcon} />
             <TabButton tab="showcase" label="Mastery Showcase" icon={TrophyIcon} />
             <TabButton tab="favorites" label="Saved Hubs" icon={HeartIcon} />
             <TabButton tab="scans" label="My Scans" icon={EyeIcon} />
@@ -194,9 +199,26 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                 {user.gamificationEnabled ? (
                     <div className="flex items-center gap-10 mb-10">
                         <div className="relative"><svg className="w-24 h-24 transform -rotate-90"><circle cx="48" cy="48" r={radius} stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-900" /><circle cx="48" cy="48" r={radius} stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={strokeOffset} className="text-[#7D8FED] transition-all duration-1000 ease-out" /></svg><div className="absolute inset-0 flex items-center justify-center font-black text-xl text-white">{Math.round(progressPercent)}%</div></div>
-                        <div><p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Maker XP: {xp}</p><p className="text-2xl font-black text-white tracking-tight">{user.makerRank}</p><p className="text-[10px] font-bold text-[#7D8FED] uppercase mt-2">{currentLevel.max - xp} XP to {thresholds[thresholds.indexOf(currentLevel)+1]?.rank || 'Ascension'}</p></div>
+                        <div className="flex-1">
+                            <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Maker XP: {xp}</p>
+                            <p className="text-2xl font-black text-white tracking-tight">{user.makerRank}</p>
+                            <p className="text-[10px] font-bold text-[#7D8FED] uppercase mt-2">{currentLevel.max - xp} XP to {thresholds[thresholds.indexOf(currentLevel)+1]?.rank || 'Ascension'}</p>
+                            <p className="text-[9px] text-slate-500 mt-3 normal-case italic leading-tight">
+                                Hide/disable XP signaling anytime in <span className="text-[#7D8FED] cursor-pointer hover:underline font-bold" onClick={() => setActiveTab('preferences')}>Safety & Signal</span>.
+                            </p>
+                        </div>
                     </div>
-                ) : <div className="grid grid-cols-1 gap-4 mb-10"><div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50 flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Workshop Activity Score</span><span className="text-xl font-black text-white">{xp} Units</span></div></div>}
+                ) : (
+                    <div className="grid grid-cols-1 gap-4 mb-10">
+                        <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50 flex justify-between items-center">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Workshop Activity Score</span>
+                            <span className="text-xl font-black text-white">{xp} Units</span>
+                        </div>
+                        <p className="text-[9px] text-slate-500 normal-case italic text-center">
+                            Restore rich XP/level progression signaling in <span className="text-[#7D8FED] cursor-pointer hover:underline font-bold" onClick={() => setActiveTab('preferences')}>Safety & Signal</span>.
+                        </p>
+                    </div>
+                )}
                 <div className="grid grid-cols-2 gap-4 pt-8 border-t border-slate-700"><div className="text-center p-4 bg-slate-900/40 rounded-2xl border border-slate-700/50"><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Built</p><p className="text-xl font-black text-white">{user.completedProjects?.length || 0}</p></div><div className="text-center p-4 bg-slate-900/40 rounded-2xl border border-slate-700/50"><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Saved</p><p className="text-xl font-black text-white">{user.favoritedVideoIds?.length || 0}</p></div></div>
               </div>
               <div className="bg-[#7D8FED]/5 rounded-[2.5rem] p-10 border border-[#7D8FED]/20 shadow-xl flex flex-col relative overflow-hidden">
