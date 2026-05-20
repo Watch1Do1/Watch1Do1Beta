@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Product, CartItem, User, Money } from '../types';
-import { TrashIcon, SparkleIcon, ExternalLinkIcon, CheckCircleIcon, RefreshCwIcon, ShoppingCartIcon, LightBulbIcon, ShieldIcon, LinkIcon, EyeIcon, XCircleIcon, PlusIcon } from './IconComponents';
+import { TrashIcon, SparkleIcon, ExternalLinkIcon, CheckCircleIcon, RefreshCwIcon, ShoppingCartIcon, LightBulbIcon, ShieldIcon, LinkIcon, EyeIcon, XCircleIcon, PlusIcon, PencilIcon } from './IconComponents';
 
 interface ProductCardProps {
   product: Product;
@@ -10,6 +10,7 @@ interface ProductCardProps {
   isRevalidating?: boolean;
   onRemove?: (productId: string) => void;
   onAddToKit?: (product: Product) => void;
+  onUpdateProduct?: (productId: string, updates: Partial<Product>) => void;
   planningKit?: CartItem[];
   trackEvent?: (eventName: string, props: any) => void;
   videoId?: number;
@@ -25,6 +26,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
     isRevalidating = false,
     onRemove, 
     onAddToKit, 
+    onUpdateProduct,
     planningKit = [], 
     trackEvent, 
     videoId,
@@ -32,6 +34,22 @@ const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const [justAdded, setJustAdded] = useState(false);
   const [forceShowOverlay, setForceShowOverlay] = useState(false);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  
+  const [editName, setEditName] = useState(product.name);
+  const [editPrice, setEditPrice] = useState(product.price.amount.toString());
+  const [editImageUrl, setEditImageUrl] = useState(product.imageUrl);
+  const [editAffiliateUrl, setEditAffiliateUrl] = useState(product.creatorAffiliateUrl || product.purchaseUrl || '');
+  const [editDescription, setEditDescription] = useState(product.description || '');
+
+  useEffect(() => {
+    setEditName(product.name);
+    setEditPrice(product.price.amount.toString());
+    setEditImageUrl(product.imageUrl);
+    setEditAffiliateUrl(product.creatorAffiliateUrl || product.purchaseUrl || '');
+    setEditDescription(product.description || '');
+  }, [product]);
+
   const gamificationEnabled = currentUser?.gamificationEnabled ?? true;
 
   const kitItem = planningKit.find(item => item.id === product.id);
@@ -189,6 +207,20 @@ const ProductCard: React.FC<ProductCardProps> = ({
                       <LightBulbIcon className="w-5 h-5" />
                   </button>
 
+                  {viewMode === 'curator' && onUpdateProduct && (
+                       <button
+                           onClick={() => setIsEditingDetails(!isEditingDetails)}
+                           className={`px-4 h-10 rounded-xl border flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider transition-all ${
+                               isEditingDetails 
+                                   ? 'bg-amber-600 text-white border-amber-500' 
+                                   : 'bg-slate-700/50 text-slate-300 border-slate-600 hover:bg-slate-705 hover:text-white'
+                           }`}
+                       >
+                           <PencilIcon className="w-3.5 h-3.5" />
+                           {isEditingDetails ? 'Cancel' : 'Edit Specs'}
+                       </button>
+                  )}
+
                   {viewMode !== 'curator' && (
                     <>
                         <a 
@@ -218,6 +250,115 @@ const ProductCard: React.FC<ProductCardProps> = ({
           </div>
         </div>
       </div>
+
+       {isEditingDetails && onUpdateProduct && (
+          <div className="mt-4 pt-4 border-t border-slate-700/50 space-y-3.5 animate-scale-in">
+              <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl flex items-center gap-2">
+                  <ShieldIcon className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                  <p className="text-[10px] font-semibold text-slate-400 leading-tight">
+                      <span className="font-black text-amber-400 uppercase tracking-wider block mb-0.5">Paid Creator Pro Editor</span>
+                      Change title, price, or replace missing/incorrect pictures by pasting a direct image link below.
+                  </p>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                      <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider ml-1">Product Title</label>
+                      <input 
+                          type="text" 
+                          value={editName} 
+                          onChange={(e) => setEditName(e.target.value)} 
+                          className="w-full bg-slate-900 border border-slate-700/60 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-[#7D8FED]" 
+                          placeholder="E.g. specialized drill, soldering station..."
+                      />
+                  </div>
+                  <div className="space-y-1">
+                      <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider ml-1">Price (USD)</label>
+                      <input 
+                          type="number" 
+                          step="0.01" 
+                          value={editPrice} 
+                          onChange={(e) => setEditPrice(e.target.value)} 
+                          className="w-full bg-slate-900 border border-slate-700/60 rounded-xl p-3 text-xs font-mono text-[#7D8FED] focus:outline-none focus:border-[#7D8FED]" 
+                          placeholder="E.g. 49.99"
+                      />
+                  </div>
+              </div>
+
+              <div className="space-y-1">
+                  <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider ml-1">Product Image URL (Fix broken / random pictures)</label>
+                  <input 
+                      type="text" 
+                      value={editImageUrl} 
+                      onChange={(e) => setEditImageUrl(e.target.value)} 
+                      className="w-full bg-slate-900 border border-slate-700/60 rounded-xl p-3 text-xs text-white placeholder-slate-700 focus:outline-none focus:border-[#7D8FED]" 
+                      placeholder="Paste clean direct image link"
+                  />
+                  <p className="text-[7px] text-slate-500 font-bold ml-1 uppercase tracking-tight">Paste any internet image URL ending in .png, .jpg, or .webp to upgrade this picture immediately</p>
+              </div>
+
+              <div className="space-y-1">
+                  <label className="text-[8px] font-black uppercase text-amber-500 tracking-wider ml-1 flex items-center gap-1.5">
+                      Your Custom Affiliate / Purchase Link 
+                  </label>
+                  <input 
+                      type="text" 
+                      value={editAffiliateUrl} 
+                      onChange={(e) => setEditAffiliateUrl(e.target.value)} 
+                      className="w-full bg-[#f59e0b]/5 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-400 font-bold focus:outline-none focus:border-amber-500" 
+                      placeholder="E.g. https://amazon.com/dp/... or https://ebay.com/itm/..."
+                  />
+                  <p className="text-[7px] text-slate-500 font-bold ml-1 uppercase tracking-tight">When shoppers build your kit, they are automatically routed through your custom link!</p>
+              </div>
+
+              <div className="space-y-1">
+                  <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider ml-1">Product Description / Specs</label>
+                  <textarea 
+                      value={editDescription} 
+                      onChange={(e) => setEditDescription(e.target.value)} 
+                      rows={2} 
+                      className="w-full bg-slate-900 border border-slate-700/60 rounded-xl p-3 text-xs text-slate-300 italic focus:outline-none focus:border-[#7D8FED]" 
+                      placeholder="E.g. Essential tool for structural soldering and quick lead adjustments."
+                  />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                  <button 
+                      onClick={() => {
+                          setEditName(product.name);
+                          setEditPrice(product.price.amount.toString());
+                          setEditImageUrl(product.imageUrl);
+                          setEditAffiliateUrl(product.creatorAffiliateUrl || product.purchaseUrl || '');
+                          setEditDescription(product.description || '');
+                          setIsEditingDetails(false);
+                      }} 
+                      className="px-4 py-2 border border-slate-700 rounded-xl text-[8px] font-black uppercase tracking-wider text-slate-400 hover:text-white"
+                  >
+                      Cancel
+                  </button>
+                  <button 
+                      onClick={() => {
+                          if (onUpdateProduct) {
+                              onUpdateProduct(product.id, {
+                                  name: editName,
+                                  price: { amount: parseFloat(editPrice) || 0, currency: product.price.currency },
+                                  imageUrl: editImageUrl,
+                                  creatorAffiliateUrl: editAffiliateUrl,
+                                  purchaseUrl: editAffiliateUrl || product.purchaseUrl, // fall back to affiliate if we have one
+                                  isCreatorDeclared: true,
+                                  description: editDescription
+                              });
+                              setIsEditingDetails(false);
+                          }
+                      }} 
+                      className="px-5 py-2 bg-[#7D8FED] hover:bg-[#6b7be6] text-white rounded-xl text-[8px] font-black uppercase tracking-widest shadow-lg"
+                  >
+                      Apply Specs
+                  </button>
+              </div>
+          </div>
+       )}
+
       {isEditing && onRemove && (
         <button 
           onClick={(e) => { e.stopPropagation(); onRemove(product.id); }}

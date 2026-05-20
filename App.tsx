@@ -561,6 +561,16 @@ const App: React.FC = () => {
                     return upd;
                 });
             }} 
+            onUpdateProduct={(pid, updates) => {
+                setSelectedVideo(prev => {
+                    if (!prev) return null;
+                    const updatedProducts = prev.products.map(p => p.id === pid ? { ...p, ...updates } : p);
+                    const updatedComp = (prev.complementaryProducts || []).map(p => p.id === pid ? { ...p, ...updates } : p);
+                    const upd = { ...prev, products: updatedProducts, complementaryProducts: updatedComp };
+                    setVideos(prevVideos => prevVideos.map(v => v.id === prev.id ? upd : v));
+                    return upd;
+                });
+            }}
             onAddToKit={handleAddToKit} 
             onSubmitKit={async () => { 
                 if(selectedVideo) { 
@@ -570,8 +580,8 @@ const App: React.FC = () => {
                         setVideos(prev => prev.map(v => v.id === selectedVideo.id ? { ...v, products: selectedVideo.products, complementaryProducts: selectedVideo.complementaryProducts } : v));
                         addXP(100, "Protocol Refinement");
                     } else {
-                        await dbService.updateVideoStatus(selectedVideo.id, 'pending_review'); 
-                        setVideos(prev => prev.map(v => v.id === selectedVideo.id ? { ...v, status: 'pending_review' } : v)); 
+                        await dbService.updateVideoStatus(selectedVideo.id, 'pending_review', selectedVideo.products, selectedVideo.complementaryProducts, selectedVideo.insights, selectedVideo.title); 
+                        setVideos(prev => prev.map(v => v.id === selectedVideo.id ? { ...v, status: 'pending_review', products: selectedVideo.products, complementaryProducts: selectedVideo.complementaryProducts } : v)); 
                     }
                 } 
             }} 

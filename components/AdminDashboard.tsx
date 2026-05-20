@@ -1,17 +1,50 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
-import { Video, Product, ProjectInsights, AppEvent, Purchase, ProjectCategory, Money, User, PartnerMeta } from '../types';
-import { ShieldIcon, CheckCircleIcon, EyeIcon, ArrowLeftIcon, ShoppingCartIcon, BarChartIcon, DollarSignIcon, RefreshCwIcon, PlusIcon, TrashIcon, XCircleIcon, LinkIcon, SendIcon, MousePointerClickIcon, TrophyIcon, FileTextIcon, ExternalLinkIcon, UserIcon, SparkleIcon, CameraIcon, PackagePlusIcon, ChevronDownIcon, SearchIcon, PencilIcon, PlayIcon, MedalIcon } from './IconComponents';
+import type { Video, Product, ProjectInsights, AppEvent, Purchase, ProjectCategory, Money, User, PartnerMeta } from '../types';
+import { 
+  ShieldIcon, 
+  CheckCircleIcon, 
+  EyeIcon, 
+  ArrowLeftIcon, 
+  ShoppingCartIcon, 
+  BarChartIcon, 
+  DollarSignIcon, 
+  RefreshCwIcon, 
+  PlusIcon, 
+  TrashIcon, 
+  XCircleIcon, 
+  LinkIcon, 
+  SendIcon, 
+  MousePointerClickIcon, 
+  TrophyIcon, 
+  FileTextIcon, 
+  ExternalLinkIcon, 
+  UserIcon, 
+  SparkleIcon, 
+  CameraIcon, 
+  PackagePlusIcon, 
+  ChevronDownIcon, 
+  SearchIcon, 
+  PencilIcon, 
+  PlayIcon, 
+  MedalIcon 
+} from './IconComponents';
 import { PLATFORM_DEFAULT_CAMPID, searchSpecificProduct } from '../services/geminiService';
 import { searchEbay } from '../services/ebayService';
 import { dbService } from '../services/dbService';
-import { APP_CONFIG } from '../constants';
 
 interface AdminDashboardProps {
   videos: Video[];
   currentUser: User;
-  onApprove: (videoId: number, updatedProducts: Product[], updatedComplementary: Product[], epnCampId?: string, updatedInsights?: ProjectInsights, title?: string, creatorSubscriptionStatus?: string) => void;
-  onReject: (videoId: number) => void;
+  onApprove: (
+    videoId: number, 
+    updatedProducts: Product[], 
+    updatedComplementary: Product[], 
+    epnCampId?: string, 
+    updatedInsights?: ProjectInsights, 
+    title?: string, 
+    creatorSubscriptionStatus?: string
+  ) => void;
+  onReject: (videoId: number, reason?: string, note?: string) => void;
   onDelete: (videoId: number) => void;
   onBack: () => void;
   onNavigate?: (view: any) => void;
@@ -23,16 +56,25 @@ const formatCurrency = (m: Money | number) => {
     return `$${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, onApprove, onReject, onDelete, onBack, onNavigate, onUploadClick }) => {
+const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
+  videos, 
+  currentUser, 
+  onApprove, 
+  onReject, 
+  onDelete, 
+  onBack, 
+  onNavigate, 
+  onUploadClick 
+}) => {
   const isAdmin = currentUser.isAdmin;
-  const isPartner = currentUser.isVerifiedPartner && !isAdmin;
-  const isCreator = (currentUser.subscriptionStatus === 'Plus' || currentUser.subscriptionStatus === 'Pro' || currentUser.subscriptionStatus === 'Studio') && !isAdmin && !isPartner;
+  const isVerifiedPartner = currentUser.isVerifiedPartner && !isAdmin;
+  const isCreator = (currentUser.subscriptionStatus === 'Plus' || currentUser.subscriptionStatus === 'Pro' || currentUser.subscriptionStatus === 'Studio') && !isAdmin && !isVerifiedPartner;
   const canDeclare = currentUser.subscriptionStatus === 'Pro' || currentUser.subscriptionStatus === 'Studio';
 
   // 1. Security Gate
-  if (!isAdmin && !isPartner && !isCreator) {
+  if (!isAdmin && !isVerifiedPartner && !isCreator) {
     return (
-        <div className="min-h-screen bg-[#020617] flex items-center justify-center p-8 animate-fade-in">
+        <div className="min-h-screen bg-[#020617] flex items-center justify-center p-8 animate-fade-in font-sans">
             <div className="text-center max-w-sm bg-slate-900 p-12 rounded-[3rem] border border-slate-800 shadow-2xl">
                 <ShieldIcon className="w-16 h-16 text-rose-500 mx-auto mb-8" />
                 <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">Access Denied</h2>
@@ -47,7 +89,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
     );
   }
 
-  const [activeTab, setActiveTab] = useState<'pending' | 'library' | 'intelligence' | 'logistics' | 'users' | 'reports' | 'audit' | 'status'>( (isPartner || isCreator) ? 'intelligence' : 'pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'library' | 'intelligence' | 'logistics' | 'users' | 'reports' | 'audit' | 'status'>(
+    (isVerifiedPartner || isCreator) ? 'intelligence' : 'pending'
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [users, setUsers] = useState<User[]>([]);
@@ -59,6 +103,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
   const [purchaseData, setPurchaseData] = useState<Purchase[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(currentUser.lastSyncAt || new Date().toISOString());
+
+  // Rejection/Flag parameters
+  const [rejectReason, setRejectReason] = useState('Content Standards');
+  const [rejectNote, setRejectNote] = useState('');
+  const [showRejectModal, setShowRejectModal] = useState(false);
 
   // Edit States for the Terminal
   const [editTitle, setEditTitle] = useState('');
@@ -77,59 +126,85 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
                 dbService.getAllPurchases()
             ]);
             
-            if (isPartner) {
-                setAnalyticsEvents(events.filter(e => 
-                    e.partner?.name?.toLowerCase() === currentUser.company?.toLowerCase() ||
-                    e.partner?.id === currentUser.partnerId ||
+            if (isVerifiedPartner) {
+                const partnerName = currentUser.company?.toLowerCase() || '';
+                const partnerId = currentUser.partnerId || '';
+                setAnalyticsEvents((events || []).filter(e => 
+                    e.partner?.name?.toLowerCase() === partnerName ||
+                    e.partner?.id === partnerId ||
                     (e.videoId && videos.some(v => v.id === e.videoId && v.creatorId.toLowerCase() === currentUser.email.toLowerCase()))
                 ));
 
-                setPurchaseData(purchases.filter(p => 
-                    p.partner?.name?.toLowerCase() === currentUser.company?.toLowerCase() ||
-                    p.partner?.id === currentUser.partnerId ||
+                setPurchaseData((purchases || []).filter(p => 
+                    p.partner?.name?.toLowerCase() === partnerName ||
+                    p.partner?.id === partnerId ||
                     (p.videoId && videos.some(v => v.id === p.videoId && v.creatorId.toLowerCase() === currentUser.email.toLowerCase()))
                 ));
+            } else if (isCreator) {
+                const creatorEmail = currentUser.email.toLowerCase();
+                const myVideoIds = videos.filter(v => v.creatorId.toLowerCase() === creatorEmail).map(v => v.id);
+                setAnalyticsEvents((events || []).filter(e => 
+                    (e.videoId && myVideoIds.includes(e.videoId)) || e.userId === creatorEmail
+                ));
+                setPurchaseData((purchases || []).filter(p => 
+                    p.videoId && myVideoIds.includes(p.videoId)
+                ));
             } else {
-                setAnalyticsEvents(events);
-                setPurchaseData(purchases);
+                setAnalyticsEvents(events || []);
+                setPurchaseData(purchases || []);
             }
-        } catch (e) { console.error("Intelligence stream failure", e); }
+        } catch (e) { 
+            console.error("Intelligence stream failure", e); 
+        }
     };
     fetchIntelligence();
-  }, [activeTab, isPartner, currentUser, videos]);
+  }, [activeTab, isVerifiedPartner, isCreator, currentUser, videos]);
 
   useEffect(() => {
     if (isAdmin && activeTab === 'users') {
         const fetchUsers = async () => {
             try {
-                const response = await fetch('/api/admin/users');
-                const data = await response.json();
-                setUsers(data);
-            } catch (e) { console.error("User fetch failure", e); }
+                const data = await dbService.getAllUsers();
+                setUsers(data || []);
+            } catch (e) { 
+                console.error("User fetch failure", e); 
+            }
         };
         fetchUsers();
     }
 
     if (isAdmin && activeTab === 'reports') {
         const fetchReports = async () => {
-            const data = await dbService.getReports();
-            setReports(data);
+            try {
+                const data = await dbService.getReports();
+                setReports(data || []);
+            } catch (e) {
+                console.error("Reports fetch failure", e);
+            }
         };
         fetchReports();
     }
 
     if (isAdmin && activeTab === 'audit') {
         const fetchAudit = async () => {
-            const data = await dbService.getAuditTrail();
-            setAuditTrail(data);
+            try {
+                const data = await dbService.getAuditTrail();
+                setAuditTrail(data || []);
+            } catch (e) {
+                console.error("Audit trail fetch failure", e);
+            }
         };
         fetchAudit();
     }
 
     if (isAdmin && activeTab === 'status') {
         const fetchStatus = async () => {
-            const data = await dbService.getSystemStatus();
-            setSystemStatus(data);
+            try {
+                const data = await dbService.getSystemStatus();
+                setSystemStatus(data);
+            } catch (e) {
+                console.error("Uptime stats failed to fetch", e);
+            }
         };
         fetchStatus();
     }
@@ -141,20 +216,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
         if (success) {
             setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'resolved' } : r));
         }
-    } catch (e) { alert("Resolution failed."); }
+    } catch (e) { 
+        alert("Resolution failed."); 
+    }
   };
 
   const handleUpdateUser = async (email: string, updates: Partial<User>) => {
     try {
-        const response = await fetch('/api/admin/users/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, updates })
-        });
-        if (response.ok) {
-            setUsers(prev => prev.map(u => u.email === email ? { ...u, ...updates } : u));
+        const existingUser = users.find(u => u.email === email);
+        if (existingUser) {
+            const updated = { ...existingUser, ...updates };
+            const success = await dbService.upsertUser(updated);
+            if (success) {
+                setUsers(prev => prev.map(u => u.email === email ? updated : u));
+            }
         }
-    } catch (e) { alert("Failed to update user."); }
+    } catch (e) { 
+        alert("Failed to update user."); 
+    }
   };
 
   const partnerSplit = useMemo(() => {
@@ -168,7 +247,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
         const key = e.partner?.type || (e.metadata?.partnerType as any) || 'affiliate';
         if (by[key]) {
             if (e.type === 'video_view') by[key].views++;
-            if (e.type === 'add_to_cart') by[key].add++;
+            if (e.type === 'add_to_kit') by[key].add++;
             if (e.type === 'source_redirect') by[key].redirect++;
         }
     });
@@ -224,7 +303,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
       const counts = { views: 0, kitAdd: 0, sourceRedirect: 0, success: 0 };
       analyticsEvents.forEach(e => {
           if (e.type === 'video_view') counts.views++;
-          if (e.type === 'add_to_cart') counts.kitAdd++;
+          if (e.type === 'add_to_cart' || e.type === 'add_to_kit') counts.kitAdd++;
           if (e.type === 'source_redirect') counts.sourceRedirect++;
       });
       purchaseData.forEach(() => counts.success++);
@@ -289,14 +368,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
     setDiscoveryCandidates([]);
     try {
         const [aiResults, ebayResults] = await Promise.all([
-            searchSpecificProduct(discoveryQuery),
-            searchEbay(discoveryQuery, 5)
+            searchSpecificProduct(discoveryQuery).catch(() => [] as Product[]),
+            searchEbay(discoveryQuery, 5).catch(() => [] as Product[])
         ]);
         
-        // Combine results, prioritizing eBay for "truth"
         const combined = [...ebayResults, ...aiResults.filter(ai => !ebayResults.some(eb => eb.name.toLowerCase() === ai.name.toLowerCase()))];
         setDiscoveryCandidates(combined);
-    } catch (e) { alert("Search error."); } finally { setIsSearchingProduct(false); }
+    } catch (e) { 
+        alert("Search error."); 
+    } finally { 
+        setIsSearchingProduct(false); 
+    }
   };
 
   const handleInjectCandidate = (p: Product) => {
@@ -315,15 +397,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
 
   const handleApproveAction = () => {
     if (selectedVideo) {
-        // For creators, we ensure they don't override build requirements, just declare items
         onApprove(selectedVideo.id, editProducts, editComplementary, editEpnId, selectedVideo.insights, editTitle, selectedVideo.creatorSubscriptionStatus || currentUser.subscriptionStatus);
         setSelectedVideo(null);
     }
   };
 
   const handleRejectAction = () => {
-    if (selectedVideo && window.confirm("Flag for refinement? Creator will be notified to revise build logic.")) {
-        onReject(selectedVideo.id);
+    if (selectedVideo) {
+        onReject(selectedVideo.id, rejectReason, rejectNote);
+        setShowRejectModal(false);
         setSelectedVideo(null);
     }
   };
@@ -336,18 +418,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
   };
 
   const partnerIntelligence = useMemo(() => {
-    if (!isPartner) return null;
+    if (!isVerifiedPartner && !isAdmin) return null;
 
     const partnerName = currentUser.company?.toLowerCase() || currentUser.displayName.toLowerCase();
     const partnerId = currentUser.partnerId;
 
-    // 1. Project Demand View
     const demandVideos = videos.filter(v => 
         v.products.some(p => p.merchantId === partnerId || p.merchantName?.toLowerCase() === partnerName) ||
         v.complementaryProducts?.some(p => p.merchantId === partnerId || p.merchantName?.toLowerCase() === partnerName)
     );
 
-    // 2. Intent Funnel (Affiliate-Tuned)
     const partnerEvents = analyticsEvents.filter(e => 
         e.partner?.id === partnerId || e.partner?.name?.toLowerCase() === partnerName
     );
@@ -358,966 +438,1058 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ videos, currentUser, on
         handoff: partnerEvents.filter(e => e.type === 'source_redirect').length
     };
 
-    // 3. Kit Composition Intelligence
-    const kitsWithPartner = demandVideos.map(v => ({
-        totalItems: (v.products.length || 0) + (v.complementaryProducts?.length || 0),
-        totalBudget: parseFloat(v.insights?.costEstimate?.budgetTotal?.replace(/[^0-9.]/g, '') || '0'),
-        pairings: [...v.products, ...(v.complementaryProducts || [])].filter(p => p.merchantId !== partnerId && p.merchantName?.toLowerCase() !== partnerName),
-        difficulty: v.insights?.difficulty,
-        tools: v.insights?.toolsRequired || []
-    }));
-
-    const avgItems = kitsWithPartner.length > 0 ? kitsWithPartner.reduce((acc, k) => acc + k.totalItems, 0) / kitsWithPartner.length : 0;
-    const avgBudget = kitsWithPartner.length > 0 ? kitsWithPartner.reduce((acc, k) => acc + k.totalBudget, 0) / kitsWithPartner.length : 0;
-
-    // 4. Availability & Price Signals
-    const partnerProducts = demandVideos.flatMap(v => [...v.products, ...(v.complementaryProducts || [])])
-        .filter(p => p.merchantId === partnerId || p.merchantName?.toLowerCase() === partnerName);
-    
-    const prices = partnerProducts.map(p => p.price.amount);
-    const priceRange = prices.length > 0 ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: 0, max: 0 };
-    const availabilityFreq = partnerProducts.length > 0 ? (partnerProducts.filter(p => p.available).length / partnerProducts.length) * 100 : 0;
-
-    // 5. Marketplace Readiness (Friction Indicators)
-    const multiMerchantKits = demandVideos.filter(v => {
-        const merchants = new Set([...v.products, ...(v.complementaryProducts || [])].map(p => p.merchantName || p.retailer));
-        return merchants.size > 1;
-    }).length;
-
     return {
         demandVideos,
-        funnel,
-        composition: { avgItems, avgBudget, kitsWithPartner },
-        signals: { priceRange, availabilityFreq },
-        readiness: {
-            multiMerchantFreq: demandVideos.length > 0 ? (multiMerchantKits / demandVideos.length) * 100 : 0,
-            frictionReduction: 22, // Estimated 22% reduction in drop-off with unified checkout
-            kitStability: 94 // % of builds where partner-declared items remain unchanged
-        }
+        funnel
     };
-  }, [isPartner, currentUser, videos, analyticsEvents]);
+  }, [isVerifiedPartner, isAdmin, currentUser, videos, analyticsEvents]);
 
   const filteredVideos = useMemo(() => {
-    return videos.filter(v => {
-      if (isPartner && v.creatorId.toLowerCase() !== currentUser.email.toLowerCase()) return false;
-      
-      const matchesSearch = v.title.toLowerCase().includes(searchQuery.toLowerCase()) || v.creator.toLowerCase().includes(searchQuery.toLowerCase());
-      if (!matchesSearch) return false;
-      
-      if (activeTab === 'pending') return v.status === 'curating' || v.status === 'pending_review';
-      if (activeTab === 'library') return v.status === 'published' || v.status === 'rejected';
-      return true;
-    });
-  }, [videos, searchQuery, activeTab, isPartner, currentUser.email]);
-
-  // Terminal Detail View
-  if (selectedVideo) {
-    return (
-        <div className="min-h-screen bg-[#020617] text-slate-300 animate-fade-in">
-            <header className="sticky top-0 bg-slate-900 border-b border-slate-800 p-8 flex items-center justify-between z-50">
-                <div className="flex items-center gap-6">
-                    <button onClick={() => setSelectedVideo(null)} className="p-4 bg-slate-800 rounded-2xl hover:bg-slate-700 transition-all text-slate-400 hover:text-white">
-                        <ArrowLeftIcon className="w-6 h-6" />
-                    </button>
-                    <div>
-                        <h2 className="text-2xl font-black text-white tracking-tighter">Audit Terminal</h2>
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">Reviewing: {selectedVideo.title}</p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-4">
-                    <button onClick={handleRejectAction} className="px-8 py-4 bg-amber-500/10 text-amber-500 font-black rounded-2xl border border-amber-500/20 text-[10px] uppercase tracking-widest hover:bg-amber-500/20">Flag for Revision</button>
-                    <button onClick={handleDeleteAction} className="p-4 bg-rose-500/10 text-rose-500 rounded-2xl border border-rose-500/20 hover:bg-rose-500 hover:text-white transition-all"><TrashIcon className="w-5 h-5" /></button>
-                    <button onClick={handleApproveAction} className="px-10 py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-xl shadow-emerald-600/20 text-[10px] uppercase tracking-widest hover:scale-105 transition-all">Verify & Publish Hub</button>
-                </div>
-            </header>
-
-            <main className="p-10 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12">
-                <section className="space-y-8">
-                    <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
-                        <div className="aspect-video relative group">
-                            {selectedVideo.videoUrl ? (
-                                <video src={selectedVideo.videoUrl} className="w-full h-full object-cover" controls />
-                            ) : (
-                                <img src={selectedVideo.thumbnailUrl} className="w-full h-full object-cover opacity-60" alt="" />
-                            )}
-                            <div className="absolute top-4 left-4 bg-black/80 px-3 py-1.5 rounded-lg text-[8px] font-black uppercase text-slate-500 tracking-widest">Logic Source</div>
-                        </div>
-                    </div>
-                    
-                    <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 space-y-6">
-                        <h3 className="text-white font-black text-xs uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <ShieldIcon className="w-4 h-4 text-[#7D8FED]" /> 
-                            Audit Metadata
-                        </h3>
-                        <div className="space-y-2">
-                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Publishing Title</label>
-                            <input 
-                                type="text" 
-                                value={editTitle} 
-                                onChange={(e) => setEditTitle(e.target.value)} 
-                                className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-white font-bold focus:border-[#7D8FED] outline-none" 
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">EPN Campaign ID (eBay Tracking)</label>
-                            <input 
-                                type="text" 
-                                value={editEpnId} 
-                                onChange={(e) => setEditEpnId(e.target.value)} 
-                                className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-6 py-4 text-amber-500 font-mono text-xs focus:border-amber-500 outline-none" 
-                            />
-                        </div>
-                    </div>
-                </section>
-
-                <section className="space-y-8">
-                    <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 flex flex-col h-full shadow-2xl">
-                        <div className="mb-8">
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-white font-black text-xs uppercase tracking-widest">Hub Kit Refinement</h3>
-                                <span className="text-[10px] font-black bg-slate-800 px-3 py-1 rounded-lg text-slate-500">{editProducts.length + editComplementary.length} Tokens</span>
-                            </div>
-                            <p className="text-[9px] text-slate-500 font-medium leading-relaxed">
-                                Partner-selected items define the authoritative build. Suggested items improve availability and flexibility.
-                            </p>
-                        </div>
-
-                        <div className="space-y-6 mb-8">
-                            <form onSubmit={handleDiscovery} className="relative">
-                                <input 
-                                    type="text" 
-                                    value={discoveryQuery}
-                                    onChange={(e) => setDiscoveryQuery(e.target.value)}
-                                    placeholder="Manually inject material SKU..." 
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-12 pr-12 text-xs text-white placeholder-slate-700 outline-none focus:border-[#7D8FED]" 
-                                />
-                                <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-700" />
-                                <button type="submit" disabled={isSearchingProduct} className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-[#7D8FED] rounded-xl text-white">
-                                    {isSearchingProduct ? <RefreshCwIcon className="w-4 h-4 animate-spin" /> : <PlusIcon className="w-4 h-4" />}
-                                </button>
-                            </form>
-
-                            {discoveryCandidates.length > 0 && (
-                                <div className="space-y-3 p-4 bg-slate-950 rounded-3xl border border-[#7D8FED]/20 animate-scale-in">
-                                    <p className="text-[8px] font-black uppercase text-amber-500 tracking-[0.2em] mb-2">Pick Market Variant:</p>
-                                    {discoveryCandidates.map(cand => (
-                                        <div key={cand.id} className="flex items-center justify-between p-3 bg-slate-900 rounded-xl border border-slate-800 group hover:border-[#7D8FED]/30 transition-all">
-                                            <div className="flex items-center gap-4 min-w-0">
-                                                <img src={cand.imageUrl} className="w-10 h-10 rounded object-cover grayscale opacity-60 group-hover:opacity-100 group-hover:grayscale-0 transition-all" alt="" />
-                                                <div className="min-w-0">
-                                                    <p className="text-[9px] font-black text-white uppercase truncate">{cand.retailer}</p>
-                                                    <p className="text-[10px] font-black text-[#7D8FED]">{formatCurrency(cand.price)}</p>
-                                                </div>
-                                            </div>
-                                            <button onClick={() => handleInjectCandidate(cand)} className="px-4 py-1.5 bg-emerald-600 rounded-lg text-[8px] font-black uppercase text-white hover:bg-emerald-500 shadow-lg">Inject SKU</button>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="space-y-8 overflow-y-auto custom-scrollbar flex-grow max-h-[500px] pr-2">
-                            <div className="space-y-4">
-                              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                                  <p className="text-[9px] font-black uppercase text-slate-500 tracking-widest">Primary Material Set</p>
-                                  <span className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-[7px] font-black text-emerald-500 uppercase tracking-widest">
-                                      <CheckCircleIcon className="w-2.5 h-2.5" /> Official Kit Item
-                                  </span>
-                              </div>
-                              {editProducts.map((p) => (
-                                  <div key={p.id} className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex items-center gap-4 group">
-                                      <img src={p.imageUrl} className="w-12 h-12 rounded-lg object-cover border border-slate-800 grayscale group-hover:grayscale-0 transition-all" alt="" />
-                                      <div className="flex-grow min-w-0">
-                                          <div className="flex items-center gap-2">
-                                              <p className="text-[10px] font-black text-white uppercase truncate">{p.name}</p>
-                                              {p.isCreatorDeclared ? (
-                                                  <span className="text-[7px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">Creator Declared</span>
-                                              ) : (
-                                                  <span className="text-[7px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">Official</span>
-                                              )}
-                                          </div>
-                                          <div className="flex items-center gap-3 mt-1">
-                                              <span className="text-[9px] font-bold text-emerald-500">{formatCurrency(p.price)}</span>
-                                              <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">{p.retailer}</span>
-                                          </div>
-                                          {canDeclare && (
-                                              <div className="mt-2 flex items-center gap-2">
-                                                  <button 
-                                                      onClick={() => {
-                                                          const updated = editProducts.map(item => item.id === p.id ? {...item, isCreatorDeclared: !item.isCreatorDeclared} : item);
-                                                          setEditProducts(updated);
-                                                      }}
-                                                      className={`text-[7px] font-black uppercase px-2 py-1 rounded border transition-all ${p.isCreatorDeclared ? 'bg-amber-500 text-slate-900 border-amber-500' : 'text-slate-500 border-slate-800 hover:border-amber-500/50'}`}
-                                                  >
-                                                      {p.isCreatorDeclared ? 'Declared' : 'Declare Canonical'}
-                                                  </button>
-                                                  {p.isCreatorDeclared && (
-                                                      <input 
-                                                          type="text"
-                                                          placeholder="Affiliate URL..."
-                                                          value={p.creatorAffiliateUrl || ''}
-                                                          onChange={(e) => {
-                                                              const updated = editProducts.map(item => item.id === p.id ? {...item, creatorAffiliateUrl: e.target.value} : item);
-                                                              setEditProducts(updated);
-                                                          }}
-                                                          className="flex-grow bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[8px] text-amber-500 outline-none focus:border-amber-500/50"
-                                                      />
-                                                  )}
-                                              </div>
-                                          )}
-                                      </div>
-                                      <button onClick={() => handleRemoveProduct(p.id, false)} className="p-3 text-slate-700 hover:text-rose-500 hover:bg-rose-500/5 rounded-xl transition-all">
-                                          <TrashIcon className="w-4 h-4" />
-                                      </button>
-                                  </div>
-                              ))}
-                            </div>
-
-                            {editComplementary.length > 0 && (
-                              <div className="space-y-4">
-                                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                                  <p className="text-[9px] font-black uppercase text-slate-500 tracking-widest">Complementary Accessories</p>
-                                  <span className="flex items-center gap-1.5 px-2 py-0.5 bg-[#7D8FED]/10 border border-[#7D8FED]/20 rounded text-[7px] font-black text-[#7D8FED] uppercase tracking-widest">
-                                      <SparkleIcon className="w-2.5 h-2.5" /> Suggested Alternative
-                                  </span>
-                                </div>
-                                {editComplementary.map((p) => (
-                                    <div key={p.id} className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex items-center gap-4 group">
-                                        <img src={p.imageUrl} className="w-12 h-12 rounded-lg object-cover border border-slate-800 grayscale group-hover:grayscale-0 transition-all" alt="" />
-                                        <div className="flex-grow min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <p className="text-[10px] font-black text-white uppercase truncate">{p.name}</p>
-                                                <span className="text-[7px] font-black text-[#7D8FED] uppercase tracking-widest bg-[#7D8FED]/10 px-1.5 py-0.5 rounded border border-[#7D8FED]/20">Suggested</span>
-                                            </div>
-                                            <div className="flex items-center gap-3 mt-1">
-                                                <span className="text-[9px] font-bold text-emerald-500">{formatCurrency(p.price)}</span>
-                                                <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">{p.retailer}</span>
-                                            </div>
-                                        </div>
-                                        <button onClick={() => handleRemoveProduct(p.id, true)} className="p-3 text-slate-700 hover:text-rose-500 hover:bg-rose-500/5 rounded-xl transition-all">
-                                            <TrashIcon className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {editProducts.length === 0 && editComplementary.length === 0 && <p className="text-center py-20 text-slate-700 font-black text-[10px] uppercase tracking-widest">Logic payload empty</p>}
-                        </div>
-
-                        <div className="mt-8 pt-8 border-t border-slate-800">
-                           <div className="flex items-center gap-4 p-5 bg-emerald-500/5 rounded-2xl border border-emerald-500/20">
-                               <CheckCircleIcon className="w-6 h-6 text-emerald-500" />
-                               <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-                                   Ensure all tool mappings are accurate. Misaligned material data reduces conversion rates and affects safety scores.
-                               </p>
-                           </div>
-                        </div>
-                    </div>
-                </section>
-            </main>
-        </div>
+    const q = searchQuery.toLowerCase().trim();
+    return videos.filter(v => 
+        v.title.toLowerCase().includes(q) || 
+        v.creator.toLowerCase().includes(q) || 
+        v.category.toLowerCase().includes(q)
     );
-  }
+  }, [videos, searchQuery]);
+
+  const pendingVideos = useMemo(() => {
+    return videos.filter(v => v.status === 'pending_review' || v.status === 'curating');
+  }, [videos]);
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearchQuery.toLowerCase().trim();
+    return users.filter(u => 
+        u.email.toLowerCase().includes(q) || 
+        u.displayName.toLowerCase().includes(q) ||
+        (u.company && u.company.toLowerCase().includes(q))
+    );
+  }, [users, userSearchQuery]);
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-300 font-sans flex animate-fade-in">
-      <aside className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col sticky top-0 h-screen hidden lg:flex">
-          <div className="p-8 border-b border-slate-800 flex items-center gap-4">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${isAdmin ? 'bg-rose-500/10 border-rose-500/30 text-rose-500' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'}`}>
-                  <ShieldIcon className="w-6 h-6" />
-              </div>
-              <div className="min-w-0">
-                  <h2 className="text-white font-black text-sm uppercase tracking-tighter truncate">{isAdmin ? 'Root Admin' : currentUser.company || currentUser.displayName}</h2>
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{isAdmin ? 'System Control' : 'Partner Intelligence Portal'}</p>
-              </div>
-          </div>
-          
-          <nav className="flex-grow p-4 space-y-2">
-              {[
-                { id: 'intelligence', label: 'Intelligence', icon: BarChartIcon },
-                { id: 'library', label: 'Build Library', icon: FileTextIcon, hide: currentUser.subscriptionStatus === 'Plus' },
-                { id: 'pending', label: 'Audit Queue', icon: RefreshCwIcon, hide: currentUser.subscriptionStatus === 'Plus' },
-                { id: 'users', label: 'User Protocol', icon: UserIcon, hide: !isAdmin },
-                { id: 'reports', label: 'Reports', icon: ShieldIcon, hide: !isAdmin },
-                { id: 'audit', label: 'Audit Trail', icon: FileTextIcon, hide: !isAdmin },
-                { id: 'status', label: 'System Status', icon: RefreshCwIcon, hide: !isAdmin },
-                { id: 'logistics', label: 'Merchant Identity', icon: PackagePlusIcon, hide: !isPartner }
-              ].map(item => !item.hide && (
+    <div className="min-h-screen bg-[#020617] text-slate-200 font-sans selection:bg-[#7D8FED]/25 selection:text-white pb-16">
+      {/* Upper Navigation Bar */}
+      <div className="border-b border-slate-905 bg-slate-950/60 backdrop-blur-xl sticky top-0 z-40 px-6 py-4.5">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
                   <button 
-                    key={item.id} 
-                    onClick={() => { setActiveTab(item.id as any); setSelectedVideo(null); }}
-                    aria-label={`Switch to ${item.label} view`}
-                    className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all text-[10px] font-black uppercase tracking-widest ${
-                        activeTab === item.id ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:text-white hover:bg-slate-800/30'
-                    }`}
+                      onClick={onBack} 
+                      className="p-2.5 rounded-xl border border-slate-800 bg-slate-900/50 text-slate-400 hover:text-white hover:border-slate-750 transition-all flex items-center justify-center"
+                      title="Return"
                   >
-                      <item.icon className={`w-4 h-4 ${activeTab === item.id ? (isAdmin ? 'text-rose-500' : 'text-emerald-500') : ''}`} />
-                      {item.label}
+                      <ArrowLeftIcon className="w-4 h-4" />
                   </button>
-              ))}
-          </nav>
-
-          <div className="p-6 mt-auto border-t border-slate-800 space-y-2">
-              {onNavigate && (
-                  <button 
-                    onClick={() => onNavigate('affiliateGuide')} 
-                    className="w-full flex items-center gap-3 px-6 py-4 text-[10px] font-black uppercase text-[#7D8FED] hover:text-white transition-colors bg-[#7D8FED]/5 rounded-2xl border border-[#7D8FED]/10 hover:border-[#7D8FED]/30"
-                  >
-                      <MedalIcon className="w-4 h-4" /> Affiliate Guide
-                  </button>
-              )}
-              <button onClick={onBack} className="w-full flex items-center gap-3 px-6 py-4 text-[10px] font-black uppercase text-slate-500 hover:text-white transition-colors">
-                  <ArrowLeftIcon className="w-4 h-4" /> Exit Console
-              </button>
-          </div>
-      </aside>
-
-      <main className="flex-grow p-8 lg:p-12 overflow-y-auto max-w-screen-2xl">
-          <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-12">
-              <div>
-                  <h1 className="text-4xl font-black text-white tracking-tighter">
-                      {activeTab === 'intelligence' ? 'Project Demand Intelligence' : activeTab === 'pending' ? 'Operational Audit' : activeTab === 'logistics' ? 'Merchant Identity' : 'Build Library'}
-                  </h1>
-                  <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.4em] mt-2">
-                      Secure Node {APP_CONFIG.VERSION}{APP_CONFIG.IS_BETA ? `-${APP_CONFIG.BETA_LABEL.split(' ')[0]}` : ''} • {new Date().toLocaleDateString()}
-                  </p>
-              </div>
-              <div className="flex items-center gap-6">
-                  <div className="text-right hidden sm:block">
-                      <p className="text-[9px] font-black text-white uppercase tracking-widest">Partner kits define the authoritative build.</p>
-                      <p className="text-[8px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">The platform may suggest optional alternatives for availability.</p>
+                  <div>
+                      <div className="flex items-center gap-1.5 leading-none">
+                          <ShieldIcon className="w-3.5 h-3.5 text-[#7D8FED]" />
+                          <span className="text-[9px] font-black tracking-widest text-[#7D8FED] uppercase">Control Matrix</span>
+                      </div>
+                      <h1 className="text-xl font-black text-white tracking-tight mt-1">
+                          {isAdmin ? "Standard Command Terminal" : (isVerifiedPartner ? "Verified Partner Suite" : "Creator Ops Hub")}
+                      </h1>
                   </div>
-                  {isPartner && (
-                    <button onClick={onUploadClick} className="px-6 py-3 bg-emerald-600 text-white font-black rounded-xl text-[9px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl flex items-center gap-2">
-                        <PlusIcon className="w-4 h-4" /> Initialize Hub Listing
-                    </button>
+              </div>
+
+              {/* Tabs Navigation */}
+              <div className="flex flex-wrap items-center bg-slate-900/60 p-1 rounded-2xl border border-slate-800/80 gap-1">
+                  {isAdmin && (
+                      <>
+                          <button 
+                              onClick={() => { setActiveTab('pending'); setSelectedVideo(null); }} 
+                              className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${activeTab === 'pending' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                              Queue ({pendingVideos.length})
+                          </button>
+                          <button 
+                              onClick={() => { setActiveTab('library'); setSelectedVideo(null); }} 
+                              className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'library' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                              Database
+                          </button>
+                      </>
+                  )}
+                  {(isAdmin || isVerifiedPartner || isCreator) && (
+                      <button 
+                          onClick={() => { setActiveTab('intelligence'); setSelectedVideo(null); }} 
+                          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${activeTab === 'intelligence' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                          <BarChartIcon className="w-3.5 h-3.5" /> Intelligence
+                      </button>
+                  )}
+                  {(isAdmin || isVerifiedPartner) && (
+                      <button 
+                          onClick={() => { setActiveTab('logistics'); setSelectedVideo(null); }} 
+                          className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'logistics' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                          Logistics
+                      </button>
+                  )}
+                  {isAdmin && (
+                      <>
+                          <button 
+                              onClick={() => { setActiveTab('users'); setSelectedVideo(null); }} 
+                              className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'users' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                              Users
+                          </button>
+                          <button 
+                              onClick={() => { setActiveTab('reports'); setSelectedVideo(null); }} 
+                              className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'reports' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                              Reports ({reports.filter(r => r.status === 'pending').length})
+                          </button>
+                          <button 
+                              onClick={() => { setActiveTab('audit'); setSelectedVideo(null); }} 
+                              className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'audit' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                              Audit
+                          </button>
+                          <button 
+                              onClick={() => { setActiveTab('status'); setSelectedVideo(null); }} 
+                              className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${activeTab === 'status' ? 'bg-[#7D8FED] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                          >
+                              Status
+                          </button>
+                      </>
                   )}
               </div>
-          </header>
+          </div>
+      </div>
 
-            {activeTab === 'intelligence' ? (
-              <div className="space-y-12 animate-fade-in">
-                  {isPartner && partnerIntelligence ? (
-                      <div className="space-y-16">
-                          {/* 1. Project Demand View */}
-                          <section className="space-y-8">
-                              <div className="flex items-center justify-between">
-                                  <div>
-                                      <h3 className="text-2xl font-black text-white tracking-tighter">Project Demand View</h3>
-                                      <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-1">Your products are appearing in these real-world build scenarios</p>
-                                  </div>
-                                  <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-                                      <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">{partnerIntelligence.demandVideos.length} Active Projects</span>
-                                  </div>
-                              </div>
-                              
-                              <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
-                                  <table className="w-full text-left">
-                                      <thead className="bg-slate-950 text-[9px] uppercase text-slate-500 font-black tracking-widest">
-                                          <tr>
-                                              <th className="px-8 py-6">Project / Hub</th>
-                                              <th className="px-8 py-6">Category</th>
-                                              <th className="px-8 py-6">Difficulty</th>
-                                              <th className="px-8 py-6">Cost Range</th>
-                                              <th className="px-8 py-6">Source</th>
-                                              <th className="px-8 py-6 text-right">Role</th>
-                                          </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-800/50">
-                                          {partnerIntelligence.demandVideos.map(v => {
-                                              const partnerProds = [...v.products, ...(v.complementaryProducts || [])].filter(p => 
-                                                  p.merchantId === currentUser.partnerId || 
-                                                  p.merchantName?.toLowerCase() === (currentUser.company?.toLowerCase() || currentUser.displayName.toLowerCase())
-                                              );
-                                              const isOfficial = v.products.some(p => p.merchantId === currentUser.partnerId || p.merchantName?.toLowerCase() === (currentUser.company?.toLowerCase() || currentUser.displayName.toLowerCase()));
-                                              const isTool = partnerProds.some(p => p.technicalSpecs?.toLowerCase().includes('tool') || v.insights?.toolsRequired?.some(t => p.name.toLowerCase().includes(t.toLowerCase())));
-                                              
-                                              return (
-                                                  <tr key={v.id} className="hover:bg-slate-800/40 transition-all">
-                                                      <td className="px-8 py-6">
-                                                          <div className="flex items-center gap-4">
-                                                              <img src={v.thumbnailUrl} className="w-12 aspect-video rounded-lg object-cover border border-slate-800" alt="" />
-                                                              <span className="font-bold text-white text-sm">{v.title}</span>
-                                                          </div>
-                                                      </td>
-                                                      <td className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase">{v.category}</td>
-                                                      <td className="px-8 py-6">
-                                                          <span className={`px-2 py-1 rounded text-[8px] font-black uppercase ${
-                                                              v.insights?.difficulty === 'Beginner' ? 'bg-emerald-500/10 text-emerald-500' :
-                                                              v.insights?.difficulty === 'Intermediate' ? 'bg-amber-500/10 text-amber-500' : 'bg-rose-500/10 text-rose-500'
-                                                          }`}>
-                                                              {v.insights?.difficulty || 'Unknown'}
-                                                          </span>
-                                                      </td>
-                                                      <td className="px-8 py-6 text-[10px] font-bold text-slate-400">{v.insights?.costEstimate?.budgetTotal || 'N/A'}</td>
-                                                      <td className="px-8 py-6">
-                                                          <span className={`flex items-center gap-1.5 text-[8px] font-black uppercase tracking-widest ${isOfficial ? 'text-emerald-500' : 'text-[#7D8FED]'}`}>
-                                                              {isOfficial ? <CheckCircleIcon className="w-3 h-3" /> : <SparkleIcon className="w-3 h-3" />}
-                                                              {isOfficial ? 'Official' : 'Suggested'}
-                                                          </span>
-                                                      </td>
-                                                      <td className="px-8 py-6 text-right">
-                                                          <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${isTool ? 'bg-amber-500/10 text-amber-400' : 'bg-[#7D8FED]/10 text-[#7D8FED]'}`}>
-                                                              {isTool ? 'Required Tool' : 'Primary Material'}
-                                                          </span>
-                                                      </td>
-                                                  </tr>
-                                              );
-                                          })}
-                                          {partnerIntelligence.demandVideos.length === 0 && (
-                                              <tr>
-                                                  <td colSpan={5} className="py-20 text-center text-slate-700 font-black uppercase text-[10px] tracking-widest">No project demand detected yet</td>
-                                              </tr>
-                                          )}
-                                      </tbody>
-                                  </table>
-                              </div>
-                          </section>
-
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                              {/* 2. Intent Funnel (Affiliate-Tuned) */}
-                              <section className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl">
-                                  <div className="flex items-center justify-between mb-12">
-                                      <h3 className="text-2xl font-black text-white tracking-tighter">Intent Funnel</h3>
-                                      <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full uppercase">Affiliate Tuned</span>
-                                  </div>
-                                  <div className="space-y-10">
-                                      {[
-                                          { label: 'Observed Demand', val: partnerIntelligence.funnel.observed, sub: 'Project Views', color: 'bg-white/10' },
-                                          { label: 'Planning Intent', val: partnerIntelligence.funnel.planning, sub: 'Added to Kit', color: 'bg-[#7D8FED]/20' },
-                                          { label: 'Retail Hand-off', val: partnerIntelligence.funnel.handoff, sub: 'Affiliate Clicks', color: 'bg-emerald-500/20' }
-                                      ].map((step, i) => (
-                                          <div key={i} className="relative">
-                                              <div className={`w-full h-20 ${step.color} rounded-2xl border border-white/5 flex items-center justify-between px-8 group hover:border-white/20 transition-all`}>
-                                                  <div>
-                                                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{step.label}</p>
-                                                      <p className="text-[8px] font-bold text-slate-600 uppercase mt-0.5">{step.sub}</p>
-                                                  </div>
-                                                  <span className="text-3xl font-black text-white tracking-tighter">{step.val.toLocaleString()}</span>
-                                              </div>
-                                              {i < 2 && (
-                                                  <div className="absolute -bottom-6 left-1/2 -translate-x-1/2">
-                                                      <ChevronDownIcon className="w-4 h-4 text-slate-800" />
-                                                  </div>
-                                              )}
-                                          </div>
-                                      ))}
-                                  </div>
-                                  <div className="mt-10 p-5 bg-slate-950 rounded-2xl border border-slate-800">
-                                      <p className="text-[9px] text-slate-500 font-medium leading-relaxed">
-                                          <span className="text-emerald-500 font-bold">Insight:</span> Unified checkout would reduce friction by an estimated <span className="text-white font-black">22%</span> between Planning and Hand-off.
-                                      </p>
-                                  </div>
-                              </section>
-
-                              <div className="space-y-8">
-                                  {/* 3. Kit Composition Intelligence */}
-                                  <section className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl">
-                                      <h3 className="text-xl font-black text-white tracking-tighter mb-8">Kit Composition Intelligence</h3>
-                                      <div className="grid grid-cols-2 gap-6">
-                                          <div className="p-6 bg-slate-950 rounded-2xl border border-slate-800">
-                                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Avg Items / Build</p>
-                                              <p className="text-2xl font-black text-white">{partnerIntelligence.composition.avgItems.toFixed(1)}</p>
-                                          </div>
-                                          <div className="p-6 bg-slate-950 rounded-2xl border border-slate-800">
-                                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Avg Project Budget</p>
-                                              <p className="text-2xl font-black text-emerald-500">{formatCurrency(partnerIntelligence.composition.avgBudget)}</p>
-                                          </div>
-                                      </div>
-                                      <div className="mt-8 space-y-4">
-                                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Common Pairings</p>
-                                          <div className="flex flex-wrap gap-2">
-                                              {Array.from(new Set(partnerIntelligence.composition.kitsWithPartner.flatMap(k => k.pairings.map(p => p.name)))).slice(0, 5).map((name, i) => (
-                                                  <span key={i} className="px-3 py-1.5 bg-slate-800 rounded-lg text-[9px] font-bold text-slate-300 border border-white/5">{name}</span>
-                                              ))}
-                                              {partnerIntelligence.composition.kitsWithPartner.length === 0 && <span className="text-[9px] text-slate-700 font-bold italic">Awaiting more kit data...</span>}
-                                          </div>
-                                      </div>
-                                  </section>
-
-                                  {/* 4. Availability & Price Signals */}
-                                  <section className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl">
-                                      <h3 className="text-xl font-black text-white tracking-tighter mb-8">Availability & Price Signals</h3>
-                                      <div className="space-y-6">
-                                          <div className="flex justify-between items-center">
-                                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Observed Price Range</p>
-                                              <p className="text-sm font-black text-white">
-                                                  {formatCurrency(partnerIntelligence.signals.priceRange.min)} — {formatCurrency(partnerIntelligence.signals.priceRange.max)}
-                                              </p>
-                                          </div>
-                                          <div className="space-y-2">
-                                              <div className="flex justify-between items-center">
-                                                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Availability Frequency</p>
-                                                  <p className="text-[10px] font-black text-emerald-500">{partnerIntelligence.signals.availabilityFreq.toFixed(1)}%</p>
-                                              </div>
-                                              <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
-                                                  <div className="h-full bg-emerald-500" style={{ width: `${partnerIntelligence.signals.availabilityFreq}%` }}></div>
-                                              </div>
-                                          </div>
-                                          <p className="text-[9px] text-slate-600 font-medium italic">Powered by eBay Browse API & Real-time Telemetry</p>
-                                      </div>
-                                  </section>
-                              </div>
+      <div className="max-w-7xl mx-auto px-6 mt-8">
+          
+          {/* QUEUE & REVIEW TAB */}
+          {activeTab === 'pending' && isAdmin && (
+              <div className="space-y-6">
+                  {selectedVideo === null ? (
+                      <div>
+                          <div className="p-6 bg-slate-900/40 border border-slate-800 rounded-3xl mb-6">
+                              <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2">Review Pending Build Hubs</h3>
+                              <p className="text-xs text-slate-500 leading-relaxed">
+                                  Found tools or user submitted setups awaiting EPN integration and safety validation before general availability on the public stream list.
+                              </p>
                           </div>
 
-                          {/* 5. Marketplace Readiness Panel */}
-                          <section className="bg-[#7D8FED]/5 border border-[#7D8FED]/20 rounded-[3rem] p-12 shadow-2xl">
-                              <div className="flex flex-col md:flex-row items-center gap-12">
-                                  <div className="flex-grow space-y-4">
-                                      <h3 className="text-3xl font-black text-white tracking-tighter">Execution Friction Indicators</h3>
-                                      <p className="text-slate-400 text-sm leading-relaxed max-w-2xl">
-                                          Your products are frequently bundled in multi-merchant kits. Currently, users must navigate separate checkout flows for each retailer, resulting in significant drop-off.
-                                      </p>
-                                  </div>
-                                  <div className="grid grid-cols-3 gap-8 flex-shrink-0">
-                                      <div className="text-center">
-                                          <p className="text-4xl font-black text-white tracking-tighter">{partnerIntelligence.readiness.multiMerchantFreq.toFixed(0)}%</p>
-                                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2">Multi-Merchant Kits</p>
-                                      </div>
-                                      <div className="text-center">
-                                          <p className="text-4xl font-black text-emerald-500 tracking-tighter">{partnerIntelligence.readiness.kitStability}%</p>
-                                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2">Kit Stability</p>
-                                      </div>
-                                      <div className="text-center">
-                                          <p className="text-4xl font-black text-[#7D8FED] tracking-tighter">-{partnerIntelligence.readiness.frictionReduction}%</p>
-                                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2">Est. Friction Drop</p>
-                                      </div>
-                                  </div>
+                          {pendingVideos.length === 0 ? (
+                              <div className="text-center py-24 bg-slate-950 border border-slate-902 border-dashed rounded-[3rem]">
+                                  <CheckCircleIcon className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+                                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Queue is entirely clear</p>
+                                  <p className="text-[10px] text-slate-500 mt-2">All scanned project hubs are published on the feed.</p>
                               </div>
-                          </section>
+                          ) : (
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                  {pendingVideos.map((video) => (
+                                      <div key={video.id} className="bg-slate-900 border border-slate-800/80 rounded-[2.5rem] overflow-hidden flex flex-col hover:border-slate-700 transition-all group">
+                                          <div className="relative aspect-video bg-slate-950">
+                                              <img src={video.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-700" alt="" />
+                                              <span className="absolute top-4 left-4 text-[7px] font-black text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-1 rounded-lg uppercase tracking-widest leading-none">
+                                                  Awaiting Spec Review
+                                              </span>
+                                          </div>
+                                          <div className="p-6 flex-grow flex flex-col justify-between">
+                                              <div>
+                                                  <span className="text-[8px] font-black text-[#7D8FED] uppercase tracking-widest">{video.category}</span>
+                                                  <h4 className="text-sm font-black text-white mt-1 group-hover:text-[#7D8FED] transition-colors line-clamp-1 leading-tight">{video.title}</h4>
+                                                  <div className="flex items-center gap-1 mt-2">
+                                                      <span className="text-[8px] font-black text-slate-400 bg-slate-950 px-2 py-1 rounded">By {video.creator}</span>
+                                                      <span className="text-[8px] font-bold text-slate-500">({video.creatorId})</span>
+                                                  </div>
+                                                  <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-800/60">
+                                                      <div className="text-center bg-slate-950/60 p-2 rounded-xl border border-slate-800/30">
+                                                          <p className="text-[14px] font-black text-slate-200">{video.products.length}</p>
+                                                          <p className="text-[7.5px] font-black text-slate-500 uppercase tracking-wider mt-0.5">Core Tools</p>
+                                                      </div>
+                                                      <div className="text-center bg-slate-950/60 p-2 rounded-xl border border-slate-800/30">
+                                                          <p className="text-[14px] font-black text-slate-200">{(video.complementaryProducts || []).length}</p>
+                                                          <p className="text-[7.5px] font-black text-slate-500 uppercase tracking-wider mt-0.5">Suggested</p>
+                                                      </div>
+                                                  </div>
+                                              </div>
+                                              <button 
+                                                  onClick={() => handleEditClick(video)} 
+                                                  className="w-full mt-6 py-4.5 bg-[#7D8FED] hover:bg-[#6b7be6] text-white text-[9px] font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-blue-950/10 flex items-center justify-center gap-2"
+                                              >
+                                                  <PencilIcon className="w-3.5 h-3.5" /> Curate Specs & Approve
+                                              </button>
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
+                          )}
                       </div>
                   ) : (
-                      <div className="space-y-12">
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                              {[
-                                { label: 'Sourced Build Value', val: formatCurrency(enterpriseStats.totalSalesValue), icon: DollarSignIcon, color: 'text-emerald-400', sub: 'Est. sourced value (affiliate & direct)' },
-                                { label: 'Sourcing Rate', val: `${((funnelStats.sourceRedirect / Math.max(1, funnelStats.views)) * 100).toFixed(2)}%`, icon: BarChartIcon, color: 'text-[#7D8FED]' },
-                                { label: 'Unique SKUs Tracked', val: enterpriseStats.topSKUs.length, icon: ShoppingCartIcon, color: 'text-amber-400' },
-                                { label: 'Global Visual Impact', val: funnelStats.views.toLocaleString(), icon: EyeIcon, color: 'text-white' }
-                              ].map((m, i) => (
-                                  <div key={i} className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-slate-800 shadow-xl group hover:border-slate-600 transition-all">
-                                      <m.icon className={`w-5 h-5 mb-4 ${m.color}`} />
-                                      <p className="text-3xl font-black text-white tracking-tighter">{m.val}</p>
-                                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-2 group-hover:text-slate-300">{m.label}</p>
-                                      {m.sub && <p className="text-[7px] font-bold text-slate-600 uppercase tracking-widest mt-1">{m.sub}</p>}
-                                  </div>
-                              ))}
-                          </div>
-
-                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-                              <div className="lg:col-span-2 space-y-10">
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                    {[
-                                        { title: 'Marketplace Sourced Value', value: formatCurrency(partnerSplit.merchant.gmv), sub: `${partnerSplit.merchant.success} conversions • ${partnerSplit.merchant.conv.toFixed(2)}% CVR`, context: 'Est. sourced value (affiliate & direct)', icon: ShieldIcon, color: 'text-emerald-400' },
-                                        { title: 'Affiliate Sourced Value', value: formatCurrency(partnerSplit.affil.gmv), sub: `${partnerSplit.affil.success} conversions • ${partnerSplit.affil.conv.toFixed(2)}% CVR`, context: 'Est. sourced value (affiliate & direct)', icon: SparkleIcon, color: 'text-amber-400' },
-                                    ].map((kpi, i) => (
-                                        <div key={i} className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] shadow-xl hover:border-slate-700 transition-all">
-                                            <div className="flex items-center justify-between mb-4">
-                                                <div className="min-w-0">
-                                                    <p className="text-10px font-black text-slate-400 uppercase tracking-widest">{kpi.title}</p>
-                                                    <p className="text-[7px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">{kpi.context}</p>
-                                                </div>
-                                                <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
-                                            </div>
-                                            <p className="text-3xl font-black text-white">{kpi.value}</p>
-                                            <p className="text-[10px] font-bold text-slate-600 mt-2 uppercase tracking-widest">{kpi.sub}</p>
-                                        </div>
-                                    ))}
-                                  </div>
-
-                                  <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl relative overflow-hidden">
-                                      <div className="flex items-center justify-between mb-12">
-                                          <h3 className="text-2xl font-black text-white tracking-tighter">Purchase Lifecycle</h3>
-                                          <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full uppercase">Real-time Stream</span>
-                                      </div>
-                                      <div className="flex flex-col md:flex-row items-center justify-between gap-12 relative z-10">
-                                          {[
-                                              { label: 'Catalog Hits', val: funnelStats.views },
-                                              { label: 'Kit Intents', val: funnelStats.kitAdd },
-                                              { label: 'Source Redirect', val: funnelStats.sourceRedirect },
-                                              { label: 'Success', val: funnelStats.success }
-                                          ].map((step, i) => (
-                                              <div key={i} className="flex-1 text-center">
-                                                  <div className="relative mb-6">
-                                                      <div className="w-20 h-20 bg-slate-950 rounded-[2rem] mx-auto flex items-center justify-center border border-slate-800 shadow-inner group hover:border-emerald-500 transition-all">
-                                                          <span className="text-2xl font-black text-white group-hover:scale-110 transition-transform">{step.val}</span>
-                                                      </div>
-                                                      {i < 3 && <div className="hidden md:block absolute top-1/2 -right-6 w-12 h-px bg-slate-800"></div>}
-                                                  </div>
-                                                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{step.label}</p>
-                                              </div>
-                                          ))}
-                                      </div>
-                                  </div>
-
-                                  <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 shadow-2xl">
-                                      <h3 className="text-2xl font-black text-white tracking-tighter mb-8">SKU Performance Map</h3>
-                                      <div className="space-y-6">
-                                          {enterpriseStats.topSKUs.map((sku, idx) => (
-                                              <div key={idx} className="flex items-center gap-6 p-4 hover:bg-slate-800/30 rounded-2xl transition-all">
-                                                  <img src={sku.img} className="w-12 h-12 rounded-xl object-cover border border-slate-700" alt={sku.name} />
-                                                  <div className="flex-grow min-w-0">
-                                                      <p className="text-[10px] font-black text-white uppercase truncate">{sku.name}</p>
-                                                      <div className="mt-2 w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                                                          <div className="h-full bg-emerald-500" style={{ width: `${(sku.revenue / Math.max(1, enterpriseStats.totalSalesValue)) * 100}%` }}></div>
-                                                      </div>
-                                                  </div>
-                                                  <div className="text-right">
-                                                      <p className="text-sm font-black text-emerald-400">{formatCurrency(sku.revenue)}</p>
-                                                      <p className="text-[8px] font-bold text-slate-600 uppercase mt-0.5">{sku.sales} units</p>
-                                                  </div>
-                                              </div>
-                                          ))}
-                                          {enterpriseStats.topSKUs.length === 0 && <p className="text-center py-20 text-slate-600 font-black uppercase text-[10px] tracking-widest">No commercial activity recorded</p>}
-                                      </div>
-                                  </div>
-                              </div>
-
-                              <div className="space-y-8">
-                                  <div className="bg-[#7D8FED]/5 border border-[#7D8FED]/20 p-10 rounded-[2.5rem] shadow-xl">
-                                      <h3 className="text-white font-black text-xs uppercase tracking-widest mb-6">Reporting Suite</h3>
-                                      <div className="space-y-6">
-                                          <button onClick={handleExportPartnerCSV} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[9px] uppercase tracking-widest transition-all shadow-lg flex items-center justify-center gap-3">
-                                              <FileTextIcon className="w-4 h-4" /> Export Analytics CSV
-                                          </button>
-                                          <button className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl text-[9px] uppercase tracking-widest transition-all">Generate Brand Deck PDF</button>
-                                      </div>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                  )}
-              </div>
-          ) : activeTab === 'users' ? (
-              <div className="animate-fade-in space-y-12">
-                  <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
-                      <div className="p-8 border-b border-slate-800 flex justify-between items-center">
-                          <div className="flex items-center gap-4">
-                              <h3 className="text-2xl font-black text-white tracking-tighter">User Identity Protocol</h3>
+                      /* DETAILED VIDEO TERMINAL VIEW (DRAWER) */
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-scale-in">
+                          {/* Left Panel: Preview Metadata */}
+                          <div className="lg:col-span-4 space-y-6">
                               <button 
-                                  onClick={async () => {
-                                      const response = await fetch('/api/admin/users');
-                                      const data = await response.json();
-                                      setUsers(data);
-                                  }}
-                                  className="p-2 text-slate-500 hover:text-emerald-500 transition-colors"
-                                  title="Sync Registry"
+                                  onClick={() => setSelectedVideo(null)} 
+                                  className="py-3 px-5 border border-slate-800 bg-slate-900/60 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-white flex items-center gap-2 transition-all"
                               >
-                                  <RefreshCwIcon className="w-4 h-4" />
+                                  ← Back to Queue
                               </button>
-                          </div>
-                          <div className="relative w-72">
-                              <SearchIcon className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                              <input 
-                                  type="text" 
-                                  value={userSearchQuery}
-                                  onChange={(e) => setUserSearchQuery(e.target.value)}
-                                  placeholder="Search identity..." 
-                                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-3 pl-14 pr-6 text-[10px] text-white focus:border-emerald-500 outline-none transition-all" 
-                              />
-                          </div>
-                      </div>
-                      <table className="w-full text-left">
-                          <thead className="bg-slate-950 text-[9px] uppercase text-slate-500 font-black tracking-widest">
-                              <tr>
-                                  <th className="px-10 py-8">User Information</th>
-                                  <th className="px-10 py-8">Status / Rank</th>
-                                  <th className="px-10 py-8">Permissions</th>
-                                  <th className="px-10 py-8 text-right">Partner Detail</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/50">
-                              {users.filter(u => 
-                                u.email.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
-                                u.displayName.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-                                u.company?.toLowerCase().includes(userSearchQuery.toLowerCase())
-                              ).map((u) => (
-                                  <tr key={u.email} className="hover:bg-slate-800/40 transition-all">
-                                      <td className="px-10 py-8">
-                                          <p className="font-black text-white text-sm uppercase">{u.displayName}</p>
-                                          <p className="text-[10px] font-bold text-slate-500 truncate mt-1">{u.email}</p>
-                                      </td>
-                                      <td className="px-10 py-8">
-                                          <div className="flex flex-col gap-1">
-                                              <select 
-                                                  value={u.subscriptionStatus} 
-                                                  onChange={(e) => handleUpdateUser(u.email, { subscriptionStatus: e.target.value })}
-                                                  className={`px-2 py-1 rounded w-fit text-[8px] font-black uppercase tracking-widest border border-slate-800 outline-none transition-all ${
-                                                      u.subscriptionStatus === 'Free' ? 'bg-slate-800 text-slate-500' : 'bg-emerald-500 text-slate-950'
-                                                  }`}
-                                              >
-                                                  <option value="Free">Free</option>
-                                                  <option value="Plus">Creator Plus</option>
-                                                  <option value="Pro">Pro Creator</option>
-                                                  <option value="Studio">Studio Lead</option>
-                                              </select>
-                                              <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Rank: {u.makerRank}</span>
-                                          </div>
-                                      </td>
-                                      <td className="px-10 py-8">
-                                          <div className="flex gap-4">
-                                              <button 
-                                                  onClick={() => handleUpdateUser(u.email, { isAdmin: !u.isAdmin })}
-                                                  className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all border ${
-                                                      u.isAdmin ? 'bg-rose-500 text-white border-rose-500' : 'text-slate-500 border-slate-800 hover:border-rose-500/50'
-                                                  }`}
-                                              >
-                                                  Admin
-                                              </button>
-                                              <button 
-                                                  onClick={() => handleUpdateUser(u.email, { isVerifiedPartner: !u.isVerifiedPartner })}
-                                                  className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all border ${
-                                                      u.isVerifiedPartner ? 'bg-emerald-500 text-slate-950 border-emerald-500' : 'text-slate-500 border-slate-800 hover:border-emerald-500/50'
-                                                  }`}
-                                              >
-                                                  Partner
-                                              </button>
-                                          </div>
-                                      </td>
-                                      <td className="px-10 py-8 text-right space-y-2">
-                                          <div className="flex flex-col items-end gap-2">
-                                              <input 
-                                                  type="text" 
-                                                  placeholder="Assign Company..." 
-                                                  value={u.company || ''} 
-                                                  onChange={(e) => handleUpdateUser(u.email, { company: e.target.value })}
-                                                  className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-[10px] text-white w-40 outline-none focus:border-emerald-500 transition-all font-bold"
-                                              />
-                                              <input 
-                                                  type="text" 
-                                                  placeholder="Partner ID..." 
-                                                  value={u.partnerId || ''} 
-                                                  onChange={(e) => handleUpdateUser(u.email, { partnerId: e.target.value })}
-                                                  className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-[10px] text-slate-400 w-40 outline-none focus:border-emerald-500 transition-all font-mono"
-                                              />
-                                          </div>
-                                      </td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
-                  </div>
-              </div>
-          ) : activeTab === 'reports' ? (
-              <div className="animate-fade-in space-y-12">
-                  <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
-                      <div className="p-8 border-b border-slate-800">
-                          <h3 className="text-2xl font-black text-white tracking-tighter">Project Quality Reports</h3>
-                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Manual signals from builders about project integrity</p>
-                      </div>
-                      <table className="w-full text-left">
-                          <thead className="bg-slate-950 text-[9px] uppercase text-slate-500 font-black tracking-widest">
-                              <tr>
-                                  <th className="px-10 py-8">Project / Reporter</th>
-                                  <th className="px-10 py-8">Category</th>
-                                  <th className="px-10 py-8">Description</th>
-                                  <th className="px-10 py-8 text-right">Action</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/50">
-                              {reports.map((report) => (
-                                  <tr key={report.id} className="hover:bg-slate-800/40 transition-all">
-                                      <td className="px-10 py-8">
-                                          <p className="font-black text-white text-sm uppercase">{report.projectTitle}</p>
-                                          <p className="text-[10px] font-bold text-[#7D8FED] truncate mt-1">{report.reporterEmail}</p>
-                                          <p className="text-[8px] text-slate-500 mt-1">{new Date(report.timestamp).toLocaleString()}</p>
-                                      </td>
-                                      <td className="px-10 py-8">
-                                          <span className={`px-3 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest border ${
-                                              report.category === 'safety_concern' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                                          }`}>
-                                              {report.category.replace('_', ' ')}
-                                          </span>
-                                      </td>
-                                      <td className="px-10 py-8">
-                                          <p className="text-xs text-slate-400 max-w-md line-clamp-2 italic">"{report.description}"</p>
-                                      </td>
-                                      <td className="px-10 py-8 text-right">
-                                          {report.status === 'pending' ? (
-                                              <button 
-                                                onClick={() => handleResolveReport(report.id)}
-                                                className="px-6 py-3 bg-emerald-600 text-white text-[8px] font-black uppercase rounded-xl hover:bg-emerald-500 transition-all"
-                                              >
-                                                  Resolve Task
-                                              </button>
-                                          ) : (
-                                              <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest bg-slate-950 px-4 py-2 rounded-xl">Protocol Resolved</span>
-                                          )}
-                                      </td>
-                                  </tr>
-                              ))}
-                              {reports.length === 0 && <tr><td colSpan={4} className="py-24 text-center opacity-30 font-black uppercase text-[10px]">No active reports</td></tr>}
-                          </tbody>
-                      </table>
-                  </div>
-              </div>
-          ) : activeTab === 'audit' ? (
-              <div className="animate-fade-in space-y-12">
-                  <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
-                      <div className="p-8 border-b border-slate-800">
-                          <h3 className="text-2xl font-black text-white tracking-tighter">Administrative Audit Trail</h3>
-                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Immutable record of high-authority protocol execution</p>
-                      </div>
-                      <div className="p-4 space-y-2 max-h-[700px] overflow-y-auto custom-scrollbar">
-                          {auditTrail.map((entry, idx) => (
-                              <div key={idx} className="flex gap-6 p-6 bg-slate-950/50 rounded-2xl border border-slate-800 group hover:border-[#7D8FED]/20 transition-all">
-                                  <div className="flex-shrink-0 text-[10px] font-mono text-slate-600 w-32">{new Date(entry.timestamp).toLocaleString()}</div>
-                                  <div className="flex-grow">
-                                      <div className="flex items-center gap-3 mb-1">
-                                          <span className="text-[10px] font-black text-[#7D8FED] uppercase tracking-widest">{entry.adminEmail}</span>
-                                          <span className="text-[8px] font-black bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded uppercase">{entry.action}</span>
+
+                              <div className="bg-slate-900 border border-slate-800/80 rounded-[2.5rem] p-6 space-y-5">
+                                  <div className="aspect-video rounded-2xl bg-slate-950 overflow-hidden relative">
+                                      <img src={selectedVideo.thumbnailUrl} className="w-full h-full object-cover" alt="" />
+                                      {selectedVideo.videoUrl ? (
+                                          <a 
+                                              href={selectedVideo.videoUrl} 
+                                              target="_blank" 
+                                              rel="noopener noreferrer" 
+                                              className="absolute inset-0 bg-slate-950/40 hover:bg-slate-950/10 transition-colors flex items-center justify-center group"
+                                          >
+                                              <PlayIcon className="w-12 h-12 text-white group-hover:scale-110 transition-transform" />
+                                          </a>
+                                      ) : null}
+                                  </div>
+
+                                  <div>
+                                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1 leading-none">Reviewing Workspace</p>
+                                      <h3 className="text-xl font-black text-white leading-tight mt-1">{selectedVideo.title}</h3>
+                                      <p className="text-[10px] font-bold text-[#7D8FED] uppercase tracking-wider mt-1">{selectedVideo.category}</p>
+                                  </div>
+
+                                  <div className="space-y-3.5 p-4 bg-slate-950/70 border border-slate-800/70 rounded-2xl">
+                                      <div>
+                                          <p className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none">Creator / Submitter</p>
+                                          <p className="text-xs font-black text-slate-200 mt-1">{selectedVideo.creator} <span className="text-[9px] text-slate-500 font-bold ml-1">({selectedVideo.creatorId})</span></p>
                                       </div>
-                                      <p className="text-sm font-bold text-white mb-2">{entry.details}</p>
-                                      {entry.metadata && (
-                                          <div className="text-[8px] font-mono text-slate-600 bg-black/30 p-2 rounded overflow-x-auto">
-                                              {JSON.stringify(entry.metadata)}
+                                      <div>
+                                          <p className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none">Subscription Privilege</p>
+                                          <span className="inline-block text-[8px] font-black text-amber-500 bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/20 uppercase tracking-widest mt-1">
+                                              {selectedVideo.creatorSubscriptionStatus || 'Pro'} Tier
+                                          </span>
+                                      </div>
+                                  </div>
+
+                                  <div className="space-y-3">
+                                      <div className="space-y-1">
+                                          <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Modify Title for SEO</label>
+                                          <input 
+                                              type="text" 
+                                              value={editTitle} 
+                                              onChange={(e) => setEditTitle(e.target.value)} 
+                                              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-[#7D8FED]" 
+                                          />
+                                      </div>
+
+                                      <div className="space-y-1">
+                                          <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Affiliate EPN Campaign ID</label>
+                                          <input 
+                                              type="text" 
+                                              value={editEpnId} 
+                                              onChange={(e) => setEditEpnId(e.target.value)} 
+                                              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-[#7D8FED] font-bold focus:outline-none focus:border-[#7D8FED]" 
+                                          />
+                                          <p className="text-[6.5px] font-semibold text-slate-500 uppercase tracking-wide">Defaults to main system campaign code: 5339014523</p>
+                                      </div>
+                                  </div>
+
+                                  <div className="pt-4 border-t border-slate-800/80 space-y-3.5">
+                                      <button 
+                                          onClick={handleApproveAction} 
+                                          className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-emerald-950/20 flex items-center justify-center gap-1.5"
+                                      >
+                                          <CheckCircleIcon className="w-4 h-4" /> Approve & Make Public
+                                      </button>
+                                      <div className="grid grid-cols-2 gap-3">
+                                          <button 
+                                              onClick={() => setShowRejectModal(true)} 
+                                              className="py-3 px-2 bg-slate-950/60 border border-rose-500/25 hover:border-rose-500 text-rose-500 hover:bg-rose-500/5 text-[8.5px] font-black uppercase tracking-widest rounded-xl transition-all"
+                                          >
+                                              Request Revisions
+                                          </button>
+                                          <button 
+                                              onClick={handleDeleteAction} 
+                                              className="py-3 px-2 bg-slate-950/60 border border-slate-800 hover:border-rose-600 text-slate-500 hover:text-rose-500 text-[8.5px] font-black uppercase tracking-widest rounded-xl transition-all"
+                                          >
+                                              Purge Hub
+                                          </button>
+                                      </div>
+                                  </div>
+                              </div>
+                          </div>
+
+                          {/* Right Panel: Spec Terminal Editor */}
+                          <div className="lg:col-span-8 bg-slate-900 border border-slate-800/80 rounded-[2.5rem] p-6 lg:p-8 space-y-8">
+                              {/* 1. DISCOVERY & INJECTION BOX */}
+                              <div>
+                                  <div className="p-5.5 bg-slate-950 border border-slate-850 rounded-[2rem] space-y-4">
+                                      <div className="flex items-center gap-2">
+                                          <SparkleIcon className="w-5 h-5 text-[#7D8FED] animate-pulse" />
+                                          <div>
+                                              <p className="text-[10px] font-black text-white uppercase tracking-wider">Inject Listings Into Specs</p>
+                                              <p className="text-[7.5px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Scours active eBay catalogs and AI records instantaneously</p>
+                                          </div>
+                                      </div>
+                                      
+                                      <form onSubmit={handleDiscovery} className="flex gap-2">
+                                          <div className="relative flex-grow">
+                                              <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                                              <input 
+                                                  type="text" 
+                                                  placeholder="Search drill bits, soldering irons, 3D printers..." 
+                                                  value={discoveryQuery} 
+                                                  onChange={(e) => setDiscoveryQuery(e.target.value)} 
+                                                  className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3.5 pl-11 pr-5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#7D8FED]"
+                                              />
+                                          </div>
+                                          <button 
+                                              type="submit" 
+                                              disabled={isSearchingProduct} 
+                                              className="py-3.5 px-6 bg-[#7D8FED] hover:bg-[#6b7be6] disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+                                          >
+                                              {isSearchingProduct ? 'Searching...' : 'Locate'}
+                                          </button>
+                                      </form>
+
+                                      {discoveryCandidates.length > 0 && (
+                                          <div className="border-t border-slate-904 pt-4 space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                                              <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Candidates Found ({discoveryCandidates.length})</p>
+                                              {discoveryCandidates.map((cand) => (
+                                                  <div key={cand.id} className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between gap-3 hover:border-slate-700 transition" title="Click inject to add items">
+                                                      <div className="flex items-center gap-2.5 min-w-0">
+                                                          <img src={cand.imageUrl} className="w-9 h-9 object-cover rounded border border-slate-800" alt="" />
+                                                          <div className="min-w-0">
+                                                              <p className="text-[10px] font-black text-white uppercase truncate max-w-md">{cand.name}</p>
+                                                              <div className="flex items-center gap-2 mt-0.5">
+                                                                  <span className="text-[9px] font-semibold text-emerald-500">{formatCurrency(cand.price)}</span>
+                                                                  <span className="text-[7.5px] font-bold text-slate-550 uppercase tracking-tight">{cand.retailer}</span>
+                                                              </div>
+                                                          </div>
+                                                      </div>
+                                                      <button 
+                                                          onClick={() => handleInjectCandidate(cand)} 
+                                                          className="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[8px] font-black uppercase tracking-wide rounded-md transition"
+                                                      >
+                                                          Inject Item
+                                                      </button>
+                                                  </div>
+                                              ))}
                                           </div>
                                       )}
                                   </div>
                               </div>
-                          ))}
-                          {auditTrail.length === 0 && <p className="text-center py-20 text-slate-700 font-black uppercase text-[10px] tracking-widest">Registry empty</p>}
-                      </div>
-                  </div>
-              </div>
-          ) : activeTab === 'status' ? (
-              <div className="animate-fade-in space-y-12">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                      <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 space-y-8 shadow-2xl">
-                          <div className="flex items-center gap-4">
-                              <RefreshCwIcon className="w-8 h-8 text-[#7D8FED]" />
-                              <h3 className="text-2xl font-black text-white tracking-tighter">Cluster Health</h3>
-                          </div>
-                          
-                          <div className="space-y-6">
-                              {[
-                                  { label: 'Database Protocol', val: systemStatus?.db || 'Syncing...', sub: 'MongoDB Atlas' },
-                                  { label: 'Server State', val: systemStatus?.server || 'Operational', sub: 'Express Runtime' },
-                                  { label: 'System Uptime', val: `${Math.floor((systemStatus?.uptime || 0) / 3600)}h ${Math.floor(((systemStatus?.uptime || 0) % 3600) / 60)}m`, sub: 'Process Persistence' },
-                                  { label: 'API Response', val: '0.12ms (avg)', sub: 'Latency Monitor' }
-                              ].map((item, i) => (
-                                  <div key={i} className="flex justify-between items-center py-4 border-b border-slate-800 last:border-0">
-                                      <div>
-                                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{item.label}</p>
-                                          <p className={`text-sm font-black mt-1 ${item.val === 'connected' || item.val === 'Operational' ? 'text-emerald-500' : 'text-white'}`}>{item.val.toUpperCase()}</p>
-                                      </div>
-                                      <span className="text-[8px] font-bold text-slate-600 uppercase text-right">{item.sub}</span>
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
 
-                      <div className="bg-slate-900 border border-slate-800 rounded-[3rem] p-10 flex flex-col items-center justify-center text-center shadow-xl relative overflow-hidden">
-                          <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500 animate-pulse"></div>
-                          <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 border-2 border-emerald-500/20">
-                             <CheckCircleIcon className="w-10 h-10 text-emerald-500" />
-                          </div>
-                          <h4 className="text-xl font-black text-white mb-2 uppercase tracking-tighter">Network Integrity: 100%</h4>
-                          <p className="text-slate-500 text-xs font-medium max-w-[240px] mb-8 leading-relaxed">
-                              All distributed nodes are reporting normal heartbeat signals. No critical packet loss or database locks detected.
-                          </p>
-                          <div className="flex gap-4">
-                              <button onClick={() => setSystemStatus(prev => ({ ...prev, lastSync: new Date().toISOString() }))} className="px-6 py-3 bg-[#7D8FED] text-white text-[9px] font-black uppercase rounded-xl shadow-lg">Run Stress Test</button>
-                              <button className="px-6 py-3 bg-slate-800 text-slate-400 text-[9px] font-black uppercase rounded-xl">Clear Cache</button>
-                          </div>
-                      </div>
-                  </div>
-              </div>
-          ) : activeTab === 'logistics' ? (
-              <div className="animate-fade-in space-y-12">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 space-y-8 shadow-2xl relative overflow-hidden">
-                          {isSyncing && (
-                              <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
-                                  <RefreshCwIcon className="w-12 h-12 text-emerald-500 animate-spin mb-4" />
-                                  <p className="text-[10px] font-black text-white uppercase tracking-widest animate-pulse">Scanning Merchant Identity...</p>
+                              {/* 2. CORE PRODUCTS LIST */}
+                              <div className="space-y-4">
+                                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                                      <span className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                          Core Tools & Materials Spec ({editProducts.length})
+                                      </span>
+                                  </div>
+                                  {editProducts.map((p) => (
+                                      <div key={p.id} className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex items-start gap-4 group">
+                                          <img src={p.imageUrl} className="w-16 h-16 rounded-xl object-cover border border-slate-800/80 shadow-md flex-shrink-0 bg-slate-900 transition-transform group-hover:scale-105" alt="" />
+                                          <div className="flex-grow min-w-0 space-y-1.5">
+                                              <div className="flex flex-wrap items-center gap-2 mb-1">
+                                                  <p className="text-xs font-black text-white leading-snug break-words pr-1 max-w-sm">{p.name}</p>
+                                                  {p.isCreatorDeclared ? (
+                                                      <span className="text-[7px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">Creator Declared</span>
+                                                  ) : (
+                                                      <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded">Scanned</span>
+                                                  )}
+                                              </div>
+                                              <div className="flex flex-wrap items-center gap-3 mt-1">
+                                                  <span className="text-[9px] font-bold text-emerald-400">{formatCurrency(p.price)}</span>
+                                                  <span className="text-[8px] font-black text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded uppercase tracking-widest">{p.retailer}</span>
+                                                  {p.purchaseUrl && p.purchaseUrl !== '#' && (
+                                                      <a 
+                                                          href={p.purchaseUrl} 
+                                                          target="_blank" 
+                                                          rel="noopener noreferrer" 
+                                                          className="text-[8px] font-black uppercase text-[#7D8FED] hover:underline flex items-center gap-1"
+                                                      >
+                                                          Inspect Listing ↗
+                                                      </a>
+                                                  )}
+                                              </div>
+                                              {p.description && (
+                                                  <p className="text-[8.5px] text-slate-500 mt-1.5 italic line-clamp-2 leading-relaxed">{p.description}</p>
+                                              )}
+                                              {canDeclare && (
+                                                  <div className="mt-2.5 flex items-center gap-2">
+                                                      <button 
+                                                          onClick={() => {
+                                                              const updated = editProducts.map(item => item.id === p.id ? {...item, isCreatorDeclared: !item.isCreatorDeclared} : item);
+                                                              setEditProducts(updated);
+                                                          }} 
+                                                          className={`px-2.5 py-1 text-[8px] font-black uppercase tracking-wider rounded border transition-all ${
+                                                              p.isCreatorDeclared 
+                                                                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' 
+                                                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                                                          }`}
+                                                      >
+                                                          {p.isCreatorDeclared ? 'Declared Verified' : 'Mark Creator Declared'}
+                                                      </button>
+                                                  </div>
+                                              )}
+                                          </div>
+                                          <button onClick={() => handleRemoveProduct(p.id, false)} className="p-3 text-slate-700 hover:text-rose-500 hover:bg-rose-500/5 rounded-xl transition-all self-center">
+                                              <TrashIcon className="w-4 h-4" />
+                                          </button>
+                                      </div>
+                                  ))}
                               </div>
-                          )}
-                          <div className="flex items-center gap-4 mb-2">
-                             <PackagePlusIcon className="w-8 h-8 text-emerald-500" />
-                             <h3 className="text-2xl font-black text-white tracking-tighter">Identity NOC</h3>
-                          </div>
-                          
-                          <div className="space-y-6">
-                              {[
-                                  { label: 'Merchant ID', val: currentUser.partnerId || 'W1D1-PRO-01', sub: 'Global Marketplace ID' },
-                                  { label: 'Merchant Type', val: currentUser.merchantType || 'Individual Maker', sub: 'Entity Classification' },
-                                  { label: 'Catalog Index', val: `${currentUser.catalogCount || 0} Units`, sub: 'Active SKUs' },
-                                  { label: 'Sync Heartbeat', val: new Date(lastSyncTime).toLocaleString(), sub: 'Last Successful Protocol' }
-                              ].map((item, i) => (
-                                  <div key={i} className="flex justify-between items-center py-4 border-b border-slate-800 last:border-0">
-                                      <div>
-                                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{item.label}</p>
-                                          <p className="text-sm font-black text-white mt-1">{item.val}</p>
-                                      </div>
-                                      <span className="text-[8px] font-bold text-slate-600 uppercase tracking-tighter text-right">{item.sub}</span>
+
+                              {/* 3. COMPLEMENTARY PRODUCTS LIST */}
+                              <div className="space-y-4">
+                                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                                      <span className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                          Complementary Kit Recommendations ({(editComplementary || []).length})
+                                      </span>
                                   </div>
-                              ))}
-                          </div>
-
-                          <div className="flex gap-4">
-                              <button onClick={handleForceSync} className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[10px] uppercase tracking-widest transition-all">Refresh Identity</button>
-                              <button className="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-slate-400 font-black rounded-xl text-[10px] uppercase tracking-widest transition-all">View API Logs</button>
+                                  {editComplementary.map((p) => (
+                                      <div key={p.id} className="bg-slate-950 border border-slate-800 p-4 rounded-2xl flex items-start gap-4 group">
+                                          <img src={p.imageUrl} className="w-16 h-16 rounded-xl object-cover border border-slate-800/80 shadow-md flex-shrink-0 bg-slate-900 transition-transform group-hover:scale-105" alt="" />
+                                          <div className="flex-grow min-w-0 space-y-1.5">
+                                              <div className="flex flex-wrap items-center gap-2 mb-1">
+                                                  <p className="text-xs font-black text-white leading-snug break-words pr-1 max-w-sm">{p.name}</p>
+                                                  <span className="text-[7px] font-black text-[#7D8FED] uppercase tracking-widest bg-[#7D8FED]/10 px-1.5 py-0.5 rounded border border-[#7D8FED]/20">Suggested</span>
+                                              </div>
+                                              <div className="flex flex-wrap items-center gap-3 mt-1">
+                                                  <span className="text-[9px] font-bold text-emerald-400">{formatCurrency(p.price)}</span>
+                                                  <span className="text-[8px] font-black text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded uppercase tracking-widest">{p.retailer}</span>
+                                                  {p.purchaseUrl && p.purchaseUrl !== '#' && (
+                                                      <a 
+                                                          href={p.purchaseUrl} 
+                                                          target="_blank" 
+                                                          rel="noopener noreferrer" 
+                                                          className="text-[8px] font-black uppercase text-[#7D8FED] hover:underline flex items-center gap-1"
+                                                      >
+                                                          Inspect Listing ↗
+                                                      </a>
+                                                  )}
+                                              </div>
+                                              {p.description && (
+                                                  <p className="text-[8.5px] text-slate-500 mt-1.5 italic line-clamp-2 leading-relaxed">{p.description}</p>
+                                              )}
+                                          </div>
+                                          <button onClick={() => handleRemoveProduct(p.id, true)} className="p-3 text-slate-700 hover:text-rose-500 hover:bg-rose-500/5 rounded-xl transition-all self-center">
+                                              <TrashIcon className="w-4 h-4" />
+                                          </button>
+                                      </div>
+                                  ))}
+                              </div>
                           </div>
                       </div>
-
-                      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 flex flex-col items-center justify-center text-center shadow-xl">
-                          <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 border-2 border-emerald-500/20">
-                             <CheckCircleIcon className="w-10 h-10 text-emerald-500" />
-                          </div>
-                          <h4 className="text-xl font-black text-white mb-2">Identity Status: Operational</h4>
-                          <p className="text-slate-500 text-xs font-medium max-w-[240px] mb-8 leading-relaxed">
-                              All automated identity scans and sourcing redirects are functioning within normal parameters.
-                          </p>
-                          <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                             <div className="w-full h-full bg-emerald-500 animate-pulse"></div>
-                          </div>
-                          <p className="text-[8px] font-black text-slate-700 uppercase tracking-[0.3em] mt-3">Monitoring Marketplace Integrity</p>
-                      </div>
-                  </div>
-              </div>
-          ) : (
-              <div className="bg-slate-900 border border-slate-800 rounded-[3rem] overflow-hidden shadow-2xl">
-                  <div className="p-8 border-b border-slate-800 flex justify-between items-center gap-6">
-                      <div className="relative w-96">
-                          <SearchIcon className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                          <input type="text" placeholder="Filter active catalog..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 pl-14 pr-6 text-xs text-white focus:border-emerald-500 outline-none transition-all" />
-                      </div>
-                      <div className="flex gap-2 p-1.5 bg-slate-950 rounded-2xl border border-slate-800">
-                          <button onClick={() => setActiveTab('library')} className={`px-6 py-2.5 text-[9px] font-black uppercase rounded-xl transition-all ${activeTab === 'library' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>Active Listings</button>
-                          <button onClick={() => setActiveTab('pending')} className={`px-6 py-2.5 text-[9px] font-black uppercase rounded-xl transition-all ${activeTab === 'pending' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>Pending Review</button>
-                      </div>
-                  </div>
-                  <table className="w-full text-left">
-                      <thead className="bg-slate-950 text-[9px] uppercase text-slate-500 font-black tracking-widest">
-                          <tr>
-                               <th className="px-10 py-8">Asset Identification</th>
-                               <th className="px-10 py-8">Catalog Status</th>
-                               <th className="px-10 py-8">Audience Reach</th>
-                               <th className="px-10 py-8 text-right">Actions</th>
-                          </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/50">
-                          {filteredVideos.map((video) => (
-                              <tr key={video.id} className="hover:bg-slate-800/40 transition-all group cursor-pointer" onClick={() => handleEditClick(video)}>
-                                  <td className="px-10 py-8 flex items-center gap-6">
-                                      <img src={video.thumbnailUrl} className="w-20 aspect-video rounded-xl object-cover border border-slate-800" alt={video.title} />
-                                      <span className="font-black text-sm text-white truncate max-w-xs">{video.title}</span>
-                                  </td>
-                                  <td className="px-10 py-8"><span className="px-3 py-1 bg-slate-950 border border-slate-800 rounded-lg text-[8px] font-black uppercase text-slate-500">{video.status.replace('_', ' ')}</span></td>
-                                  <td className="px-10 py-8 text-[10px] font-black text-slate-400">{video.stats?.views || 0} hits</td>
-                                  <td className="px-10 py-8 text-right">
-                                      <button className="px-6 py-3 bg-slate-800 text-white text-[8px] font-black uppercase rounded-xl hover:bg-emerald-600 transition-all">Manage Hub</button>
-                                  </td>
-                              </tr>
-                          ))}
-                          {filteredVideos.length === 0 && <tr><td colSpan={4} className="py-24 text-center opacity-30 font-black uppercase text-[10px]">No assets matching criteria</td></tr>}
-                      </tbody>
-                  </table>
+                  )}
               </div>
           )}
-      </main>
+
+          {/* MASTER DATABASE LIST TAB */}
+          {activeTab === 'library' && isAdmin && (
+              <div className="space-y-6">
+                  <div className="p-6 bg-slate-900/40 border border-slate-800 rounded-3xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                      <div>
+                          <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2">Central Library Inventory</h3>
+                          <p className="text-xs text-slate-500 leading-relaxed">Publish, inspect, unpublish, or eliminate build guides permanently on the public index.</p>
+                      </div>
+                      <div className="relative w-full sm:w-80">
+                          <SearchIcon className="absolute left-4.5 top-1/2 -get-translation -translate-y-1/2 text-slate-500 w-4 h-4" />
+                          <input 
+                              type="text" 
+                              placeholder="Fuzzy search library..." 
+                              value={searchQuery} 
+                              onChange={(e) => setSearchQuery(e.target.value)} 
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-5 text-xs text-white focus:outline-none focus:border-[#7D8FED]"
+                          />
+                      </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {filteredVideos.map((video) => (
+                          <div key={video.id} className="bg-slate-900 border border-slate-800 rounded-[2rem] p-5 flex flex-col justify-between hover:border-slate-700 transition">
+                              <div>
+                                  <div className="flex justify-between items-start gap-4">
+                                      <div>
+                                          <span className="text-[8px] font-black text-[#7D8FED] uppercase tracking-widest">{video.category}</span>
+                                          <h4 className="text-sm font-black text-white leading-tight mt-1 line-clamp-1">{video.title}</h4>
+                                          <span className="inline-block text-[7.5px] font-black text-slate-500 uppercase tracking-widest leading-none mt-2">By {video.creator} ({video.creatorId})</span>
+                                      </div>
+                                      <span className={`text-[7px] font-black uppercase tracking-widest px-2 py-0.5 rounded leading-none ${
+                                          video.status === 'published' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                                      }`}>
+                                          {video.status}
+                                      </span>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+                                      <div className="bg-slate-950/60 p-2 rounded-xl text-[12px] font-black">
+                                          {video.products.length}
+                                          <p className="text-[7px] text-slate-500 uppercase">Core</p>
+                                      </div>
+                                      <div className="bg-slate-950/60 p-2 rounded-xl text-[12px] font-black">
+                                          {video?.stats?.views || 0}
+                                          <p className="text-[7px] text-slate-500 uppercase">Views</p>
+                                      </div>
+                                      <div className="bg-slate-950/60 p-2 rounded-xl text-[12px] font-black">
+                                          {video?.stats?.clicks || 0}
+                                          <p className="text-[7px] text-slate-500 uppercase">Clicks</p>
+                                      </div>
+                                  </div>
+                              </div>
+                              <div className="flex gap-2 mt-5">
+                                  <button 
+                                      onClick={() => handleEditClick(video)} 
+                                      className="flex-grow py-3 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-200 text-[8px] font-black uppercase tracking-widest rounded-xl transition"
+                                  >
+                                      Specs Overhaul
+                                  </button>
+                                  {video.status === 'published' ? (
+                                      <button 
+                                          onClick={async () => {
+                                              await dbService.updateVideoStatus(video.id, 'curating');
+                                              window.location.reload();
+                                          }} 
+                                          className="px-4 py-3 border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 text-amber-500 text-[8px] font-black uppercase tracking-widest rounded-xl transition"
+                                      >
+                                          Unpublish
+                                      </button>
+                                  ) : (
+                                      <button 
+                                          onClick={async () => {
+                                              await dbService.updateVideoStatus(video.id, 'published');
+                                              window.location.reload();
+                                          }} 
+                                          className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-[8px] font-black uppercase tracking-widest rounded-xl transition animate-pulse"
+                                      >
+                                          Publish
+                                      </button>
+                                  )}
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
+
+          {/* INTELLIGENCE METRIC DASHBOARD */}
+          {activeTab === 'intelligence' && (
+              <div className="space-y-8">
+                  {/* METRICS ROW */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 flex items-center gap-4.5">
+                          <span className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20">
+                              <DollarSignIcon className="w-6 h-6" />
+                          </span>
+                          <div>
+                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Gross Sales Val</span>
+                              <p className="text-xl font-black text-white mt-1 leading-none">{formatCurrency(enterpriseStats.totalSalesValue)}</p>
+                          </div>
+                      </div>
+
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 flex items-center gap-4.5">
+                          <span className="p-3 bg-[#7D8FED]/10 text-[#7D8FED] rounded-2xl border border-[#7D8FED]/20">
+                              <EyeIcon className="w-6 h-6" />
+                          </span>
+                          <div>
+                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Interactive Views</span>
+                              <p className="text-xl font-black text-white mt-1 leading-none">{funnelStats.views.toLocaleString()}</p>
+                          </div>
+                      </div>
+
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 flex items-center gap-4.5">
+                          <span className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl border border-amber-500/20">
+                              <PackagePlusIcon className="w-6 h-6" />
+                          </span>
+                          <div>
+                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Kits Constructed</span>
+                              <p className="text-xl font-black text-white mt-1 leading-none">{funnelStats.kitAdd.toLocaleString()}</p>
+                          </div>
+                      </div>
+
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 flex items-center gap-4.5">
+                          <span className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20">
+                              <MousePointerClickIcon className="w-6 h-6" />
+                          </span>
+                          <div>
+                              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Merchant Clicks</span>
+                              <p className="text-xl font-black text-white mt-1 leading-none">{funnelStats.sourceRedirect.toLocaleString()}</p>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      {/* Top Selling Tools */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 lg:p-8 space-y-6">
+                          <div>
+                              <h3 className="text-sm font-black text-white uppercase tracking-wider">Top Performing Tools</h3>
+                              <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5 font-bold">Catalog inventory ranked by click-through sales value</p>
+                          </div>
+                          <div className="space-y-4">
+                              {enterpriseStats.topSKUs.length === 0 ? (
+                                  <p className="text-xs text-slate-500 italic py-8">Waiting for first user purchase click...</p>
+                              ) : (
+                                  enterpriseStats.topSKUs.map((sku, index) => (
+                                      <div key={index} className="flex items-center justify-between p-3.5 bg-slate-950 border border-slate-800 rounded-2xl">
+                                          <div className="flex items-center gap-3 min-w-0">
+                                              <img src={sku.img} className="w-10 h-10 object-cover rounded-lg border border-slate-800" alt="" />
+                                              <div className="min-w-0">
+                                                  <p className="text-xs font-black text-white uppercase truncate max-w-sm">{sku.name}</p>
+                                                  <p className="text-[8px] text-slate-400 uppercase tracking-wider mt-0.5">{sku.sales} times chosen</p>
+                                              </div>
+                                          </div>
+                                          <span className="text-xs font-black text-emerald-400 font-mono">{formatCurrency(sku.revenue)}</span>
+                                      </div>
+                                  ))
+                              )}
+                          </div>
+                      </div>
+
+                      {/* Top Yielding Build Channels */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 lg:p-8 space-y-6">
+                          <div>
+                              <h3 className="text-sm font-black text-white uppercase tracking-wider">Top Creator Hubs</h3>
+                              <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5 font-bold">Build feeds with the highest shopper engagement rate</p>
+                          </div>
+                          <div className="space-y-4">
+                              {enterpriseStats.topVideos.length === 0 ? (
+                                  <p className="text-xs text-slate-500 italic py-8">Awaiting purchase interactions...</p>
+                              ) : (
+                                  enterpriseStats.topVideos.map((vid, index) => (
+                                      <div key={index} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex justify-between items-center">
+                                          <div>
+                                              <p className="text-xs font-black text-white uppercase truncate max-w-sm">{vid.title}</p>
+                                              <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wide mt-1">Creator: {vid.creator}</p>
+                                          </div>
+                                          <span className="text-[9px] font-black text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-lg uppercase tracking-wider">
+                                              {vid.sales} checkout signals
+                                          </span>
+                                      </div>
+                                  ))
+                              )}
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          )}
+
+          {/* LOGISTICS & PARTNER COUPLING TAB */}
+          {activeTab === 'logistics' && (isAdmin || isVerifiedPartner) && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  {/* Split overview */}
+                  <div className="lg:col-span-4 space-y-6">
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 space-y-4">
+                          <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-black text-white uppercase tracking-wider">Partner Demands</h3>
+                              <button 
+                                  onClick={handleExportPartnerCSV} 
+                                  className="p-2 border border-slate-800 hover:text-white bg-slate-950 hover:bg-slate-900 rounded-xl transition text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5"
+                              >
+                                  <FileTextIcon className="w-3.5 h-3.5" /> Export Demand CSV
+                              </button>
+                          </div>
+
+                          <div className="space-y-4.5 pt-2">
+                              <div className="p-4 bg-slate-950 border border-slate-850 rounded-2xl space-y-3">
+                                  <span className="text-[8px] font-black tracking-widest text-[#7D8FED] uppercase">Affiliate Split</span>
+                                  <div className="grid grid-cols-2 gap-2 mt-1">
+                                      <div>
+                                          <p className="text-[7.5px] font-black text-slate-500 uppercase">Interactive Views</p>
+                                          <p className="text-[17px] font-black text-white mt-0.5">{partnerSplit.affil.views}</p>
+                                      </div>
+                                      <div>
+                                          <p className="text-[7.5px] font-black text-slate-500 uppercase">Conversion (GMV)</p>
+                                          <p className="text-[17px] font-black text-emerald-400 mt-0.5 font-mono">{formatCurrency(partnerSplit.affil.gmv)}</p>
+                                      </div>
+                                  </div>
+                              </div>
+
+                              <div className="p-4 bg-slate-950 border border-slate-850 rounded-2xl space-y-3">
+                                  <span className="text-[8px] font-black tracking-widest text-amber-500 uppercase">Integrated Merchant Marketplace</span>
+                                  <div className="grid grid-cols-2 gap-2 mt-1">
+                                      <div>
+                                          <p className="text-[7.5px] font-black text-slate-500 uppercase">Route Redirects</p>
+                                          <p className="text-[17px] font-black text-white mt-0.5">{partnerSplit.merchant.redirect}</p>
+                                      </div>
+                                      <div>
+                                          <p className="text-[7.5px] font-black text-slate-500 uppercase">Conversion Ratio</p>
+                                          <p className="text-[17px] font-black text-amber-500 mt-0.5 font-mono">{partnerSplit.merchant.conv.toFixed(1)}%</p>
+                                      </div>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* Manual integration health checking */}
+                      <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 space-y-3">
+                          <h4 className="text-[10px] font-black text-white uppercase tracking-wider mb-2">Live Coupling Sync Status</h4>
+                          <div className="flex items-center justify-between p-3.5 bg-slate-950 border border-slate-850 rounded-xl">
+                              <div>
+                                  <p className="text-xs font-black text-white">Merchant Catalog Database</p>
+                                  <p className="text-[8px] font-black tracking-wider text-slate-500 uppercase mt-0.5">Last update: {lastSyncTime.split('T')[0]}</p>
+                              </div>
+                              <button 
+                                  onClick={handleForceSync} 
+                                  disabled={isSyncing} 
+                                  className="p-2 border border-slate-800 hover:text-white rounded-xl bg-slate-900 flex items-center justify-center transition disabled:opacity-40"
+                              >
+                                  <RefreshCwIcon className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#7D8FED]' : 'text-slate-400'}`} />
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* List of Coupling Partners demand catalogs */}
+                  <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 lg:p-8 space-y-6">
+                      <div>
+                          <h3 className="text-sm font-black text-white uppercase tracking-wider">Demand Catalog Coupled Kits</h3>
+                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Build guides utilizing your certified listings or registered brand inventory</p>
+                      </div>
+
+                      {partnerIntelligence?.demandVideos.length === 0 ? (
+                          <div className="py-20 text-center bg-slate-950/40 rounded-2xl border border-slate-800 border-dashed">
+                              <p className="text-xs text-slate-500 italic uppercase tracking-wider">No active build guides are currently binding your listings.</p>
+                          </div>
+                      ) : (
+                          <div className="space-y-4.5">
+                              {partnerIntelligence?.demandVideos.map((v) => (
+                                  <div key={v.id} className="p-4 bg-slate-950 border border-slate-801 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                                      <div>
+                                          <p className="text-xs font-black text-white uppercase truncate max-w-lg">{v.title}</p>
+                                          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                                              <span className="text-[7.5px] font-black text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded uppercase tracking-wider">{v.category}</span>
+                                              <span className="text-[7.5px] font-black text-indigo-400 bg-indigo-500/10 border border-[#7D8FED]/20 px-2 py-0.5 rounded uppercase tracking-wider leading-none">Difficulty: {v.insights?.difficulty || 'N/A'}</span>
+                                              <span className="text-[7.5px] font-black text-emerald-400 bg-emerald-500/5 border border-emerald-500/10 px-2 py-0.5 rounded leading-none">{v.insights?.costEstimate?.budgetTotal || 'N/A'}</span>
+                                          </div>
+                                      </div>
+                                      <button 
+                                          onClick={() => handleEditClick(v)} 
+                                          className="py-2.5 px-4.5 bg-slate-900 hover:bg-slate-850 text-slate-200 border border-slate-800 text-[8px] font-black tracking-widest uppercase rounded-xl transition"
+                                      >
+                                          Inspect Specs
+                                      </button>
+                                  </div>
+                              ))}
+                          </div>
+                      )}
+                  </div>
+              </div>
+          )}
+
+          {/* USERS ACCESS LEVEL CONTROL TAB */}
+          {activeTab === 'users' && isAdmin && (
+              <div className="space-y-6">
+                  <div className="p-6 bg-slate-900/40 border border-slate-800 rounded-3xl flex flex-col sm:flex-row justify-between items-center gap-4">
+                      <div>
+                          <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2">Access & Permissions Matrix</h3>
+                          <p className="text-xs text-slate-500 leading-relaxed">Upgrade subscriptions or grant partner verification to maker accounts.</p>
+                      </div>
+                      <div className="relative w-full sm:w-80">
+                          <SearchIcon className="absolute left-4.5 top-1/2 -get-translation -translate-y-1/2 text-slate-500 w-4 h-4" />
+                          <input 
+                              type="text" 
+                              placeholder="Fuzzy search email or name..." 
+                              value={userSearchQuery} 
+                              onChange={(e) => setUserSearchQuery(e.target.value)} 
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-5 text-xs text-white focus:outline-none focus:border-[#7D8FED]"
+                          />
+                      </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden">
+                      <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse">
+                              <thead>
+                                  <tr className="border-b border-slate-820 bg-slate-950 text-[8.5px] font-black tracking-widest text-slate-500 uppercase">
+                                      <th className="py-4.5 px-6">User / Maker Spec</th>
+                                      <th className="py-4.5 px-6">Access Level</th>
+                                      <th className="py-4.5 px-6">Gamified Tracking</th>
+                                      <th className="py-4.5 px-6">Role & Coupling</th>
+                                      <th className="py-4.5 px-6">Platform Actions</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-840/50 text-xs">
+                                  {filteredUsers.map((user) => (
+                                      <tr key={user.email} className="hover:bg-slate-955 transition-colors">
+                                          <td className="py-4.5 px-6">
+                                              <div className="flex items-center gap-3">
+                                                  <div className="w-9 h-9 rounded-full bg-[#7D8FED]/10 border border-[#7D8FED]/20 flex items-center justify-center font-bold text-white uppercase text-[10px]">
+                                                      {user.displayName?.charAt(0) || 'U'}
+                                                  </div>
+                                                  <div>
+                                                      <p className="font-black text-white leading-snug">{user.displayName}</p>
+                                                      <p className="text-[10px] text-slate-500 font-bold">{user.email}</p>
+                                                  </div>
+                                              </div>
+                                          </td>
+                                          <td className="py-4.5 px-6">
+                                              <select 
+                                                  value={user.subscriptionStatus || 'Free'} 
+                                                  onChange={(e) => handleUpdateUser(user.email, { subscriptionStatus: e.target.value as any })} 
+                                                  className="bg-slate-950 border border-slate-800 rounded-lg p-2 text-[10px] font-black text-[#7D8FED] uppercase tracking-wider focus:outline-none"
+                                              >
+                                                  <option value="Free">Free Tier</option>
+                                                  <option value="Plus">Plus Tier</option>
+                                                  <option value="Pro">Pro Premium</option>
+                                                  <option value="Studio">Studio Enterprise</option>
+                                              </select>
+                                          </td>
+                                          <td className="py-4.5 px-6">
+                                              <button 
+                                                  onClick={() => handleUpdateUser(user.email, { gamificationEnabled: !user.gamificationEnabled })} 
+                                                  className={`px-3 py-1 text-[8.5px] font-black uppercase tracking-wider rounded border transition ${
+                                                      user.gamificationEnabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-950 text-slate-500 border-slate-800'
+                                                  }`}
+                                              >
+                                                  {user.gamificationEnabled ? 'Enabled (XP Active)' : 'Disabled'}
+                                              </button>
+                                          </td>
+                                          <td className="py-4.5 px-6 space-y-1">
+                                              <div className="flex items-center gap-1.5">
+                                                  <span className="text-[7.5px] font-black text-slate-500 uppercase">Admin:</span>
+                                                  <button 
+                                                      onClick={() => handleUpdateUser(user.email, { isAdmin: !user.isAdmin })} 
+                                                      className={`px-2 py-0.5 text-[7px] font-black uppercase rounded ${user.isAdmin ? 'bg-red-500/10 text-red-500' : 'bg-slate-950 text-slate-600 border border-slate-800'}`}
+                                                  >
+                                                      {user.isAdmin ? 'SYS_ADMIN' : 'NO'}
+                                                  </button>
+                                              </div>
+                                              <div className="flex items-center gap-1.5">
+                                                  <span className="text-[7.5px] font-black text-slate-500 uppercase">Partner:</span>
+                                                  <button 
+                                                      onClick={() => handleUpdateUser(user.email, { isVerifiedPartner: !user.isVerifiedPartner })} 
+                                                      className={`px-2 py-0.5 text-[7px] font-black uppercase rounded ${user.isVerifiedPartner ? 'bg-[#7D8FED]/10 text-[#7D8FED]' : 'bg-slate-950 text-slate-600 border border-slate-800'}`}
+                                                  >
+                                                      {user.isVerifiedPartner ? 'VERIFIED' : 'NO'}
+                                                  </button>
+                                              </div>
+                                          </td>
+                                          <td className="py-4.5 px-6">
+                                              <button 
+                                                  onClick={() => {
+                                                      const updatedBio = window.prompt("Adjust bio description:", user.bio || '');
+                                                      if (updatedBio !== null) handleUpdateUser(user.email, { bio: updatedBio });
+                                                  }} 
+                                                  className="text-[9px] font-black text-[#7D8FED] hover:underline uppercase tracking-wide border border-indigo-500/10 hover:border-indigo-500/30 px-3 py-1.5 rounded bg-indigo-500/5"
+                                              >
+                                                  Manage Info
+                                              </button>
+                                          </td>
+                                      </tr>
+                                  ))}
+                              </tbody>
+                          </table>
+                      </div>
+                  </div>
+              </div>
+          )}
+
+          {/* REPORTS COMPLAINTS QUEUE TAB */}
+          {activeTab === 'reports' && isAdmin && (
+              <div className="space-y-6">
+                  <div className="p-6 bg-slate-900/40 border border-slate-800 rounded-3xl">
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2">Comptroller Project Reports</h3>
+                      <p className="text-xs text-slate-500 leading-relaxed">Safety disputes, missing tools or broken steps issued by the builder community.</p>
+                  </div>
+
+                  {reports.length === 0 ? (
+                      <div className="py-20 text-center bg-slate-950 border border-slate-800 rounded-[2.5rem] border-dashed">
+                          <CheckCircleIcon className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+                          <p className="text-xs font-black uppercase text-slate-400 tracking-widest">No Active dispute reports</p>
+                      </div>
+                  ) : (
+                      <div className="space-y-4">
+                          {reports.map((r) => (
+                              <div key={r.id} className="p-5 bg-slate-900 border border-slate-800 rounded-[2rem] flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-slate-700 transition">
+                                  <div className="space-y-2 max-w-3xl">
+                                      <div className="flex items-center gap-2">
+                                          <span className={`text-[7px] font-black px-2 py-0.5 rounded uppercase tracking-widest font-mono ${
+                                              r.category === 'safety_concern' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'bg-[#7D8FED]/10 text-[#7D8FED]'
+                                          }`}>
+                                              {r.category}
+                                          </span>
+                                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{r.status}</span>
+                                      </div>
+                                      <h4 className="text-sm font-black text-white">{r.projectTitle} <span className="text-[10px] text-slate-500 font-bold font-mono ml-1">Video_ID: {r.videoId}</span></h4>
+                                      <p className="text-xs text-slate-300 italic">"{r.description}"</p>
+                                      <p className="text-[8px] font-bold text-slate-500 uppercase tracking-wider mt-1.5">Submitted by: {r.reporterEmail} at {r.timestamp?.slice(0,10)}</p>
+                                  </div>
+                                  {r.status === 'pending' && (
+                                      <button 
+                                          onClick={() => handleResolveReport(r.id)} 
+                                          className="flex-shrink-0 px-4.5 py-3 bg-emerald-600 hover:bg-emerald-500 font-black text-white text-[9px] uppercase tracking-widest rounded-xl transition shadow"
+                                      >
+                                          Mark Resolved
+                                      </button>
+                                  )}
+                              </div>
+                          ))}
+                      </div>
+                  )}
+              </div>
+          )}
+
+          {/* AUDIT LOG WINDOW TAB */}
+          {activeTab === 'audit' && isAdmin && (
+              <div className="space-y-6">
+                  <div className="p-6 bg-slate-900/40 border border-slate-800 rounded-3xl">
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2">Administrative Audit History</h3>
+                      <p className="text-xs text-slate-500 leading-relaxed text-left">Immutable sequence record logs tracking site parameters deployment and reviews.</p>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 max-h-165 overflow-y-auto space-y-3.5">
+                      {auditTrail.length === 0 ? (
+                          <p className="text-xs text-slate-500 italic py-10 text-center">Empty ledger trail...</p>
+                      ) : (
+                          auditTrail.map((log, index) => (
+                              <div key={index} className="p-4 bg-slate-950 border border-slate-850 rounded-2xl text-[10.5px] flex items-center justify-between gap-4 font-mono leading-relaxed">
+                                  <div className="min-w-0 pr-2">
+                                      <span className="text-[#7D8FED] font-black uppercase tracking-wider mr-1.5">{log.action || 'Deploy'}</span>
+                                      <span className="text-slate-300">{log.userEmail} ({log.userId})</span>
+                                      {log.metadata && (
+                                          <p className="text-[8.5px] text-slate-500 mt-1 uppercase">Meta: {JSON.stringify(log.metadata)}</p>
+                                      )}
+                                  </div>
+                                  <span className="text-slate-550 flex-shrink-0 text-[9px] font-black">{log.timestamp ? log.timestamp.split('T')[0] : 'N/A'}</span>
+                              </div>
+                          ))
+                      )}
+                  </div>
+              </div>
+          )}
+
+          {/* SYSTEM LIVE API HEALTH STATUS TAB */}
+          {activeTab === 'status' && isAdmin && (
+              <div className="space-y-6 animate-fade-in text-left">
+                  <div className="p-6 bg-slate-900/40 border border-slate-800 rounded-3xl">
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2 font-sans">Platform API Diagnostic Interface</h3>
+                      <p className="text-xs text-slate-500 leading-relaxed font-sans">Live check stats pinging linked merchant directories and backend gateways.</p>
+                  </div>
+
+                  {systemStatus ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-mono text-[10.5px]">
+                          <div className="p-6 bg-slate-900 border border-slate-800 rounded-[2rem] space-y-4">
+                              <h4 className="text-xs font-black text-white font-sans uppercase tracking-widest">Base Layer Connectivity</h4>
+                              <div className="space-y-2">
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Local Storage Buffer:</span>
+                                      <span className="text-emerald-500 font-black">STABLE (100%)</span>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Cloud SQL Endpoint:</span>
+                                      <span className={systemStatus.dbConnected ? "text-emerald-500 font-bold" : "text-amber-500 font-bold"}>
+                                          {systemStatus.dbConnected ? "ONLINE" : "PENDING"}
+                                      </span>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Secure Key Enigmas:</span>
+                                      <span className={systemStatus.mongoUriOk ? "text-emerald-500 font-bold" : "text-red-500 font-bold"}>
+                                          {systemStatus.mongoUriOk ? "ENCRYPTED" : "MISSING"}
+                                      </span>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <div className="p-6 bg-slate-900 border border-slate-800 rounded-[2rem] space-y-4">
+                              <h4 className="text-xs font-black text-white font-sans uppercase tracking-widest">External Merchant APIs</h4>
+                              <div className="space-y-2">
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Gemini Studio GenAI:</span>
+                                      <span className={systemStatus.geminiOk ? "text-emerald-500 font-bold" : "text-red-500 font-bold"}>
+                                          {systemStatus.geminiOk ? "COUPLED" : "RESTRICTED"}
+                                      </span>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>eBay Buy Browse Catalog:</span>
+                                      <span className={systemStatus.ebayOk ? "text-emerald-500 font-bold" : "text-red-500 font-bold"}>
+                                          {systemStatus.ebayOk ? "AUTHORIZED" : "EXPIRED"}
+                                      </span>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Stripe checkout:</span>
+                                      <span className={systemStatus.stripeOk ? "text-emerald-500 font-bold" : "text-red-500 font-bold"}>
+                                          {systemStatus.stripeOk ? "SYNCHRONIZED" : "STALE"}
+                                      </span>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <div className="p-6 bg-slate-900 border border-slate-800 rounded-[2rem] space-y-4">
+                              <h4 className="text-xs font-black text-white font-sans uppercase tracking-widest">Telemetry Indicators</h4>
+                              <div className="space-y-2">
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Uptime:</span>
+                                      <span className="text-emerald-400 font-bold">{Math.round(systemStatus.uptime || 0).toLocaleString()} SEC</span>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Framework Build:</span>
+                                      <span className="text-slate-400">watch1do1_pro_{systemStatus.version || "v2.5.3"}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-slate-850">
+                                      <span>Creator Notification:</span>
+                                      <span className={systemStatus.resendOk ? "text-emerald-500 font-bold" : "text-slate-500 font-bold"}>
+                                          {systemStatus.resendOk ? "RESEND_ACTIVE" : "STANDBY"}
+                                      </span>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="py-20 text-center bg-slate-900 border border-slate-800 rounded-[2.5rem]">
+                          <RefreshCwIcon className="w-10 h-10 animate-spin text-[#7D8FED] mx-auto mb-4" />
+                          <p className="text-xs text-slate-500 uppercase tracking-widest">Running ping diagnostic sequence...</p>
+                      </div>
+                  )}
+              </div>
+          )}
+      </div>
+
+      {/* REJECTION DETAIL MODAL */}
+      {showRejectModal && selectedVideo && (
+          <div className="fixed inset-0 z-50 bg-[#020617]/90 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in font-sans">
+              <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 lg:p-8 max-w-md w-full shadow-2xl space-y-5 animate-scale-in">
+                  <div>
+                      <h4 className="text-lg font-black text-white tracking-tight">Flags Refinement Setup</h4>
+                      <p className="text-xs text-slate-550 uppercase tracking-wide mt-1">Specify guidelines for creator review response sync.</p>
+                  </div>
+
+                  <div className="space-y-3.5">
+                      <div className="space-y-1">
+                          <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Classification Group</label>
+                          <select 
+                              value={rejectReason} 
+                              onChange={(e) => setRejectReason(e.target.value)} 
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none"
+                          >
+                              <option value="Content Standards">Content Standards</option>
+                              <option value="Unvouchered Out-of-Stock Listings">Unvouchered Out-of-Stock Listings</option>
+                              <option value="Erroneous Safety Protocols">Erroneous Safety Protocols</option>
+                              <option value="Mismatched Specs">Mismatched Specs</option>
+                              <option value="Low Audio-Visual Quality text font">Low Audio-Visual Quality Text Font</option>
+                          </select>
+                      </div>
+
+                      <div className="space-y-1">
+                          <label className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Dis dispute curator notes for the email</label>
+                          <textarea 
+                              value={rejectNote} 
+                              onChange={(e) => setRejectNote(e.target.value)} 
+                              rows={4} 
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 placeholder-slate-700 focus:outline-none focus:border-rose-500" 
+                              placeholder="Describe which tools or safety steps need adjustment before publication..."
+                          />
+                      </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3.5 pt-2">
+                      <button 
+                          onClick={() => { setShowRejectModal(false); }} 
+                          className="px-4 py-2 text-xs font-black text-slate-400 uppercase tracking-wider hover:text-white"
+                      >
+                          Cancel
+                      </button>
+                      <button 
+                          onClick={handleRejectAction} 
+                          className="px-5.5 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-rose-950/10"
+                      >
+                          Issue Flags Review
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

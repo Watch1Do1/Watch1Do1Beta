@@ -21,6 +21,7 @@ interface VideoPlayerViewProps {
   onRemoveProduct: (productId: string) => void;
   onAddFoundProduct: (product: Product) => void;
   onAddToKit: (product: Product) => void;
+  onUpdateProduct?: (productId: string, updates: Partial<Product>) => void;
   onSubmitKit: () => Promise<void>;
   onRateVideo: (videoId: number, rating: number) => void;
   onCompleteProject: (videoId: number, title: string, imageUrl: string, note: string) => void;
@@ -32,7 +33,7 @@ const formatPrice = (m: Money) => `$${m.amount.toFixed(2)}`;
 
 const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ 
     video, onBack, onTip, onShare, isSubscribed, onToggleFavorite, isFavorited, currentUser,
-    onRemoveProduct, onAddFoundProduct, onAddToKit, onSubmitKit, onRateVideo, onCompleteProject,
+    onRemoveProduct, onAddFoundProduct, onAddToKit, onUpdateProduct, onSubmitKit, onRateVideo, onCompleteProject,
     planningKit, trackEvent
 }) => {
   const isCreator = currentUser?.email === video.creatorId;
@@ -544,7 +545,7 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                               </div>
                           ) : (
                               [...localVideo.products, ...(localVideo.complementaryProducts || [])].map((p) => (
-                                  <ProductCard key={p.id} product={p} viewMode={(isCreator || isAiVideo) && isEditing ? 'curator' : 'shopper'} isEditing={(isCreator || isAiVideo) && isEditing} isRevalidating={revalidatingIds.includes(p.id)} onRemove={onRemoveProduct} onAddToKit={onAddToKit} planningKit={planningKit} videoId={localVideo.id} trackEvent={trackEvent} currentUser={currentUser} />
+                                  <ProductCard key={p.id} product={p} viewMode={(isCreator || isAiVideo) && isEditing ? 'curator' : 'shopper'} isEditing={(isCreator || isAiVideo) && isEditing} isRevalidating={revalidatingIds.includes(p.id)} onRemove={onRemoveProduct} onAddToKit={onAddToKit} onUpdateProduct={onUpdateProduct} planningKit={planningKit} videoId={localVideo.id} trackEvent={trackEvent} currentUser={currentUser} />
                               ))
                           )}
                           
@@ -567,8 +568,13 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                                 className={`w-full py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl transition-all flex items-center justify-center gap-3 ${isAiVideo ? 'bg-[#7D8FED] hover:bg-[#6b7ae6]' : 'bg-emerald-600 hover:bg-emerald-500'}`}
                               >
                                   {isSubmitting ? <RefreshCwIcon className="w-5 h-5 animate-spin" /> : <CheckCircleIcon className="w-5 h-5" />}
-                                  {isSubmitting ? 'Syncing...' : (isAiVideo ? 'Save Refinements' : 'Deploy Hub')}
+                                  {isSubmitting ? 'Syncing...' : (isAiVideo ? 'Save Refinements' : 'Submit Kit for Admin Review')}
                               </button>
+                              {!isAiVideo && (
+                                  <p className="text-[7.5px] font-black text-[#7D8FED] uppercase tracking-widest text-center mt-4">
+                                      This files your custom tool list into the review queue for live community release.
+                                  </p>
+                              )}
                               {isAiVideo && (
                                   <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest text-center mt-4">Saving updates this kit for all future community scans</p>
                               )}
