@@ -767,6 +767,17 @@ app.post('/api/users/upsert', async (req, res) => {
 
     console.log(`[User Upsert] Processing for: ${userData.email}`);
     const database = await getDb();
+
+    // Check if handle is taken by someone else
+    if (userData.handle) {
+      const existing = await database.collection("users").findOne({ 
+        handle: userData.handle.toLowerCase(), 
+        email: { $ne: userData.email.toLowerCase() } 
+      });
+      if (existing) {
+        return res.status(400).json({ error: "Handle already taken by another maker." });
+      }
+    }
     
     const result = await database.collection("users").updateOne(
       { email: userData.email.toLowerCase() },

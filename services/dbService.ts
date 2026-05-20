@@ -182,6 +182,20 @@ export const dbService = {
   },
 
   async upsertUser(user: User): Promise<boolean> {
+    const response = await fetch('/api/users/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user),
+    });
+
+    if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        const errMsg = errData.error || "Failed to save maker profile.";
+        throw new Error(errMsg);
+    }
+
+    const res = await response.json().catch(() => (null));
+
     const users = getLocal<User>('users');
     const existingIdx = users.findIndex(u => u.email.toLowerCase() === user.email.toLowerCase());
     if (existingIdx > -1) {
@@ -191,11 +205,6 @@ export const dbService = {
     }
     setLocal('users', users);
 
-    const res = await apiFetch('/api/users/upsert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(user),
-    });
     return !!res;
   },
 

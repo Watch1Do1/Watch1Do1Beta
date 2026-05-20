@@ -35,6 +35,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [venmoHandle, setVenmoHandle] = useState(user.venmoHandle || '');
   const [isUpdatingGateway, setIsUpdatingGateway] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setDisplayName(user.displayName);
@@ -63,11 +64,13 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const handleSaveChanges = async () => {
     if (isSaving) return;
     setIsSaving(true);
+    setError(null);
     try {
       await onProfileUpdate({ displayName, handle, bio });
       setIsEditing(false);
-    } catch (error) {
-      console.error("[ProfilePage] Error saving profile:", error);
+    } catch (err: any) {
+      console.error("[ProfilePage] Error saving profile:", err);
+      setError(err?.message || "Failed to update profile. Please try another handle.");
     } finally {
       setIsSaving(false);
     }
@@ -152,13 +155,29 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                         </div>
                         <div className="space-y-1">
                             <label className="text-[9px] font-black uppercase text-slate-500 ml-1">Maker Handle</label>
-                            <input type="text" value={handle} onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-[#7D8FED] text-sm font-black" placeholder="maker_handle" />
+                            <input 
+                                type="text" 
+                                value={handle} 
+                                onChange={(e) => { 
+                                    setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '')); 
+                                    setError(null); 
+                                }} 
+                                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-[#7D8FED] text-sm font-black" 
+                                placeholder="maker_handle" 
+                            />
                         </div>
                     </div>
                     <div className="space-y-1">
                         <label className="text-[9px] font-black uppercase text-slate-500 ml-1">Maker Bio</label>
                         <textarea value={bio} onChange={(e) => setBio(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-300 text-sm italic" rows={2} />
                     </div>
+
+                    {error && (
+                        <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[11px] font-bold rounded-xl flex items-center gap-2.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
+                            {error}
+                        </div>
+                    )}
                   </div>
               ) : (
                 <p className="text-slate-400 italic text-lg max-w-2xl mb-8">"{user.bio || 'Building the future, one project at a time.'}"</p>
@@ -176,7 +195,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                           </button>
                           <button 
                               disabled={isSaving}
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(false); }} 
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(false); setError(null); }} 
                               className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 active:scale-95 transition-all disabled:opacity-50"
                           >
                               Cancel
@@ -185,7 +204,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
                   ) : (
                       <div key="standard-actions" className="flex flex-wrap gap-4">
                           <button 
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(true); }} 
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(true); setError(null); }} 
                               className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 active:scale-95 transition-all"
                           >
                               Edit Hub Profile
