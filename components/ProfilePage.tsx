@@ -34,6 +34,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
   const [newTool, setNewTool] = useState('');
   const [venmoHandle, setVenmoHandle] = useState(user.venmoHandle || '');
   const [isUpdatingGateway, setIsUpdatingGateway] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     setDisplayName(user.displayName);
@@ -59,9 +60,17 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
       }
   };
 
-  const handleSaveChanges = () => {
-    onProfileUpdate({ displayName, handle, bio });
-    setIsEditing(false);
+  const handleSaveChanges = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      await onProfileUpdate({ displayName, handle, bio });
+      setIsEditing(false);
+    } catch (error) {
+      console.error("[ProfilePage] Error saving profile:", error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSaveGateway = () => {
@@ -157,21 +166,41 @@ const ProfilePage: React.FC<ProfilePageProps> = ({
               
               <div className="flex flex-wrap gap-4 justify-center md:justify-start">
                   {isEditing ? (
-                      <>
-                          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSaveChanges(); }} className="px-8 py-4 text-[10px] font-black uppercase bg-[#7D8FED] text-white rounded-2xl shadow-xl shadow-[#7D8FED]/20 hover:scale-105 transition-all">Update Identity</button>
-                          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(false); }} className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 transition-all">Cancel</button>
-                      </>
+                      <div key="editing-actions" className="flex flex-wrap gap-4">
+                          <button 
+                              disabled={isSaving}
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSaveChanges(); }} 
+                              className="px-8 py-4 text-[10px] font-black uppercase bg-[#7D8FED] text-white rounded-2xl shadow-xl shadow-[#7D8FED]/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+                          >
+                              {isSaving ? "Saving..." : "Update Identity"}
+                          </button>
+                          <button 
+                              disabled={isSaving}
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(false); }} 
+                              className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 active:scale-95 transition-all disabled:opacity-50"
+                          >
+                              Cancel
+                          </button>
+                      </div>
                   ) : (
-                      <>
-                          <button onClick={() => setIsEditing(true)} className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 transition-all">Edit Hub Profile</button>
+                      <div key="standard-actions" className="flex flex-wrap gap-4">
+                          <button 
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(true); }} 
+                              className="px-8 py-4 text-[10px] font-black uppercase text-slate-400 border border-slate-700 rounded-2xl hover:bg-slate-700 active:scale-95 transition-all"
+                          >
+                              Edit Hub Profile
+                          </button>
                           <div className="group relative">
-                            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onManageSubscription(); }} className={`px-8 py-4 text-[10px] font-black uppercase rounded-2xl transition-all shadow-xl flex items-center gap-3 ${user.subscriptionStatus !== 'Free' ? 'bg-[#7D8FED]/10 text-[#7D8FED] border border-[#7D8FED]/20 overflow-hidden' : 'bg-amber-500 text-slate-900 shadow-amber-500/10 hover:bg-amber-400'}`}>
-                                {user.subscriptionStatus !== 'Free' && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>}
-                                <TrophyIcon className={`w-4 h-4 ${user.subscriptionStatus !== 'Free' ? 'text-[#7D8FED]' : 'text-slate-900'}`} />
-                                <span>{user.subscriptionStatus === 'Free' ? 'Upgrade — Save 30%' : `${user.subscriptionStatus} Support Active`}</span>
-                            </button>
+                              <button 
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onManageSubscription(); }} 
+                                  className={`px-8 py-4 text-[10px] font-black uppercase rounded-2xl transition-all shadow-xl flex items-center gap-3 active:scale-95 ${user.subscriptionStatus !== 'Free' ? 'bg-[#7D8FED]/10 text-[#7D8FED] border border-[#7D8FED]/20 overflow-hidden' : 'bg-amber-500 text-slate-900 shadow-amber-500/10 hover:bg-amber-400'}`}
+                              >
+                                  {user.subscriptionStatus !== 'Free' && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>}
+                                  <TrophyIcon className={`w-4 h-4 ${user.subscriptionStatus !== 'Free' ? 'text-[#7D8FED]' : 'text-slate-900'}`} />
+                                  <span>{user.subscriptionStatus === 'Free' ? 'Upgrade — Save 30%' : `${user.subscriptionStatus} Support Active`}</span>
+                              </button>
                           </div>
-                      </>
+                      </div>
                   )}
               </div>
             </div>
