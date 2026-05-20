@@ -348,7 +348,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         }
         
         console.log(`[Auth] Reset link generated for ${email}: ${resetLink}`);
-        res.json({ success: true });
+        res.json({ success: true, devLink: resetLink });
     } catch (e: any) {
         res.status(500).json({ error: e.message });
     }
