@@ -738,7 +738,7 @@ const App: React.FC = () => {
             onKeyClick={() => {}} 
             onUpgradeClick={() => setManageSubscriptionModalOpen(true)}
         />
-        {authModalMode && <AuthModal mode={authModalMode} onClose={() => setAuthModalMode(null)} onSubmit={handleAuthSubmit} onSwitchMode={() => setAuthModalMode(prev => prev === 'login' ? 'signup' : 'login')} />}
+        {authModalMode && <AuthModal mode={authModalMode} onClose={() => setAuthModalMode(null)} onSubmit={handleAuthSubmit} onSwitchMode={(mode) => setAuthModalMode(mode)} />}
         {isSupportModalOpen && <SupportModal onClose={() => setSupportModalOpen(false)} stripeUrl={STRIPE_SUPPORT_LINK} />}
         <main className="flex-grow pt-20">{renderContent()}</main>
         <Footer onNavigate={handleFooterNavigate} />
