@@ -242,7 +242,7 @@ export const generateProductsFromText = async (text: string, category?: ProjectC
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await withTimeout(ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       contents: `Act as a Professional Consultant for the category: "${category || 'General'}". 
       The project/topic is: "${text}". 
       Identify 5-8 most essential products, tools, or gear items mentioned or required.
@@ -273,7 +273,7 @@ export const generateProductsFromImages = async (base64Images: string[], mimeTyp
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const parts = base64Images.map(data => ({ inlineData: { data, mimeType } }));
     const response = await withTimeout(ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       contents: { parts: [...parts, { text: `Identify visible products or gear for a "${category || 'General'}" project. 
       PRIORITIZE RECALL: Identify ALL potentially visible tools, hardware, or materials. Do not be overly restrictive; if something looks like a specific tool, include it as an exploratory match.
       Provide technical specifications where possible. Return JSON.` }] },
@@ -302,7 +302,7 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     
     const response = await withTimeout(ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       contents: `Analyze this tutorial/page: ${url}. 
       The user has categorized this as: "${category || 'General'}".
       Identify ALL primary products, gear items, or materials discussed. 
@@ -342,7 +342,7 @@ export const generateComplementaryProducts = async (title: string, existing: Pro
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await withTimeout(ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       contents: `For "${title}", identify 2 essential accessories with technical data.`,
       config: { responseMimeType: "application/json", responseSchema: productSchema },
     }), 15000); // 15s timeout
@@ -403,7 +403,7 @@ export const searchSpecificProduct = async (query: string): Promise<Product[]> =
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       contents: `Perform multi-retailer search for: "${query}". Provide 3 distinct options. 
       You MUST provide detailed technical specifications and verified review links for each. 
       Return JSON.`,
@@ -429,7 +429,7 @@ export const revalidateProductAvailability = async (product: Product): Promise<P
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       contents: `Price/availability for: "${product.name}".`,
       config: { tools: [{ googleSearch: {} }], responseMimeType: "application/json", 
         responseSchema: {
@@ -470,7 +470,7 @@ export const generateDeepDiveProducts = async (videoTitle: string, existing: Pro
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const existingNames = existing.map(p => p.name).join(", ");
         const response = await withTimeout(ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-3.5-flash',
             contents: `The project is "${videoTitle}" in the category "${category || 'General'}".
             Existing items already found: [${existingNames}].
             Perform a "DEEP DIVE" to identify 3-5 ADVANCED, SPECIALIZED, or PROFESSIONAL-LEVEL tools or hardware that would enhance this project or are often missed by beginners.
