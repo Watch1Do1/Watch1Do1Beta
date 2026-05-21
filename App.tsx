@@ -634,7 +634,10 @@ const App: React.FC = () => {
                         </div>
                         <div className="text-center">
                             <h1 className="text-4xl sm:text-7xl md:text-8xl font-black text-white tracking-tighter mb-2 drop-shadow-2xl">Watch1Do1</h1>
-                            <p className="text-[8px] sm:text-[10px] font-black text-[#7D8FED] uppercase tracking-[0.2em] sm:tracking-[0.5em] opacity-80">AI Vision Workshop Terminal</p>
+                            <p className="text-[8px] sm:text-[10px] font-black text-[#7D8FED] uppercase tracking-[0.2em] sm:tracking-[0.5em] opacity-80 mb-6">AI Vision Workshop Terminal</p>
+                            <p className="text-slate-400 text-xs sm:text-sm max-w-lg mx-auto font-medium leading-relaxed mb-2">
+                                AI-powered analysis gets you started fast. Creator-verified kits and community contributions keep everything accurate and up-to-date.
+                            </p>
                         </div>
                     </div>
                     

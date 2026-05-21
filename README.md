@@ -1,6 +1,8 @@
 # 🛠️ Watch1Do1 — AI-Assisted Shopping for Makers
 
-**Watch1Do1** is a high-end platform for builders, crafters, and DIY enthusiast makers. By combining high-definition video analysis with server-side AI, it parses how-to and tutorial content to instantly extract structured product kits, perform safety audits, estimate costs, and match raw ingredients to real-time purchase links on eBay.
+**Watch1Do1** is a high-end platform for builders, crafters, and DIY enthusiast makers. By combining high-definition video analysis with server-side AI, it parses how-to and tutorial content to instantly extract structured product kits, perform safety audits, estimate costs, and match raw ingredients to real-time purchase links on eBay. 
+
+AI-powered analysis gets you started fast. Creator-verified kits and community contributions keep everything accurate and up-to-date, transforming Watch1Do1 into a complete community-powered workspace.
 
 > **Live Demo:** [https://watch1-do1-beta.vercel.app](https://watch1-do1-beta.vercel.app)
 

@@ -433,7 +433,7 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                 <div className="flex items-center gap-6 mt-4">
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center overflow-hidden">{localVideo.creatorId === 'ai@watch1do1.com' ? <SparkleIcon className="w-4 h-4 text-[#7D8FED]" /> : <UserIcon className="w-4 h-4 text-slate-500" />}</div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">curated by <span className="text-[#7D8FED]">{localVideo.creatorId === 'ai@watch1do1.com' ? 'Watch1Do1 AI' : (localVideo.creatorDisplayName || localVideo.creator || 'Maker')}</span></p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">curated by <span className="text-[#7D8FED]">{localVideo.creatorId === 'ai@watch1do1.com' ? 'Watch1Do1 AI' : (localVideo.creatorHandle ? `@${localVideo.creatorHandle}` : localVideo.creatorDisplayName || localVideo.creator || 'Maker')}</span></p>
                         {localVideo.creatorSubscriptionStatus && localVideo.creatorSubscriptionStatus !== 'Free' && (
                             <div className="flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[7px] font-black text-amber-500 uppercase tracking-widest">
                                 <MedalIcon className="w-2.5 h-2.5" /> Supported Creator
@@ -482,12 +482,12 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
 
             <div className="flex-grow flex flex-col min-h-0 overflow-y-auto custom-scrollbar p-6">
               {activeTab === 'shop' && (
-                  <div className="space-y-8 animate-fade-in">
+                  <div className="space-y-6 animate-fade-in">
                       <div className="flex items-center justify-between">
                           <div className="flex flex-col">
                               <h2 className="text-xl font-black text-white uppercase tracking-widest text-xs">Build Kit</h2>
                               {isAiVideo && (
-                                  <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest mt-1 animate-pulse">AI-Generated Protocol • Refine if Incorrect</p>
+                                  <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest mt-1 animate-pulse">AI-Generated Protocol</p>
                               )}
                           </div>
                           <div className="flex gap-2">
@@ -516,6 +516,53 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                              )}
                           </div>
                       </div>
+
+                      {/* Kit Provenance & Trust Card */}
+                      <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-700/50 space-y-2">
+                          <div className="flex items-center gap-2">
+                              {isAiVideo ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[8px] font-black text-indigo-400 uppercase tracking-widest">
+                                      <SparkleIcon className="w-2.5 h-2.5 text-indigo-400" />
+                                      AI Generated • Community Improved
+                                  </span>
+                              ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[8px] font-black text-emerald-400 uppercase tracking-widest">
+                                      <CheckCircleIcon className="w-2.5 h-2.5 text-emerald-400" />
+                                      Creator Verified ✨
+                                  </span>
+                              )}
+                          </div>
+                          <p className="text-[9px] font-medium text-slate-400">
+                              {isAiVideo ? (
+                                  <span>Last edited by the <span className="text-indigo-300 font-bold">@community</span> 2 days ago</span>
+                              ) : (
+                                  <span>Last edited by <span className="text-emerald-300 font-bold">@{localVideo.creatorHandle || localVideo.creator || 'maker'}</span> 3 days ago</span>
+                              )}
+                          </p>
+                      </div>
+
+                      {/* Prominent community contribution nudge */}
+                      {!isEditing && (
+                          <div className="p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/10 space-y-3">
+                              <p className="text-[11px] text-slate-300 leading-relaxed font-medium">
+                                  Spotted something missing or incorrect? Help improve this kit for the community.
+                              </p>
+                              <div>
+                                  {currentUser ? (
+                                      <button 
+                                          onClick={() => setIsEditing(true)} 
+                                          className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 rounded-xl text-[9px] font-black text-indigo-300 uppercase tracking-widest transition-all"
+                                      >
+                                          ✍️ Edit Build Kit
+                                      </button>
+                                  ) : (
+                                      <p className="text-[9px] font-black text-indigo-400/80 uppercase tracking-wider">
+                                          Sign in to contribute your expertise and earn Maker XP!
+                                      </p>
+                                  )}
+                              </div>
+                          </div>
+                      )}
 
                       {(canManage || isAiVideo) && isEditing && (
                           <div className="space-y-4 p-6 bg-slate-900/50 rounded-3xl border border-slate-700">
