@@ -564,6 +564,37 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                           </div>
                       )}
 
+                      {/* Quality Nudge Banner */}
+                      {!isEditing && (localVideo.products.length < 4 || localVideo.products.some(p => p.confidence !== undefined && p.confidence < 0.7)) && (
+                          <div className="p-5 rounded-2xl bg-amber-500/5 border border-amber-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
+                              <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                                      <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">
+                                          {localVideo.products.length < 4 ? "Incomplete Build Kit" : "Aiding Verification Required"}
+                                      </p>
+                                  </div>
+                                  <p className="text-xs text-slate-300 font-medium">
+                                      This kit look incomplete or off-topic? Help keep Watch1Do1 accurate. Edit it directly or report issues.
+                                  </p>
+                              </div>
+                              <div className="flex gap-2 shrink-0">
+                                  <button 
+                                      onClick={() => setIsEditing(true)} 
+                                      className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-[9px] font-black text-amber-500 uppercase tracking-widest transition-all"
+                                  >
+                                      ✍️ Edit Build Kit
+                                  </button>
+                                  <button 
+                                      onClick={() => setShowReportModal(true)} 
+                                      className="px-4 py-2.5 bg-slate-850 hover:bg-slate-800 border border-slate-700/60 rounded-xl text-[9px] font-black text-slate-400 uppercase tracking-widest transition-all"
+                                  >
+                                      🚩 Report Issue
+                                  </button>
+                              </div>
+                          </div>
+                      )}
+
                       {(canManage || isAiVideo) && isEditing && (
                           <div className="space-y-4 p-6 bg-slate-900/50 rounded-3xl border border-slate-700">
                               <form onSubmit={handleMarketSearch} className="relative">

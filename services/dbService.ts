@@ -235,7 +235,7 @@ export const dbService = {
   },
 
   async getSystemStatus(): Promise<any> {
-    const data = await apiFetch<any>('/api/admin/status');
+    const data = await apiFetch<any>('/api/admin/system-status');
     return data || { db: 'disconnected', server: 'unknown', uptime: 0 };
   }
 };

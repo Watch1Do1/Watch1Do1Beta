@@ -243,12 +243,22 @@ export const generateProductsFromText = async (text: string, category?: ProjectC
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3.5-flash',
-      contents: `Act as a Professional Consultant for the category: "${category || 'General'}". 
-      The project/topic is: "${text}". 
-      Identify 5-8 most essential products, tools, or gear items mentioned or required.
-      PRIORITIZE RECALL: It is better to include a potential item than to miss a relevant one. Use exploratory analysis to surface specialized or professional-grade recommendations even if they aren't explicitly mentioned in the text.
-      For each item, if possible, provide specific technical specs.
-      Return as JSON.`,
+      contents: `You are a specialist in ${category || 'General'} projects only.
+
+STRICT CATEGORY RULES:
+- ONLY return tools, materials, and products that belong to the declared category: "${category || 'General'}".
+- If the video/page content does NOT match the declared category, or contains no relevant physical tools/materials, return an empty array [] immediately.
+- Do NOT guess or pull tools from other trades (e.g. no drywall tools for plumbing, no woodworking for electrical, etc.).
+
+Video/Project: "${text}"
+Category: "${category || 'General'}"
+
+Act as a Professional Consultant for the category: "${category || 'General'}". 
+The project/topic is: "${text}". 
+Identify 5-8 most essential products, tools, or gear items mentioned or required.
+PRIORITIZE RECALL: It is better to include a potential item than to miss a relevant one. Use exploratory analysis to surface specialized or professional-grade recommendations even if they aren't explicitly mentioned in the text.
+For each item, if possible, provide specific technical specs.
+Return as JSON.`,
       config: { responseMimeType: "application/json", responseSchema: productSchema },
     }), 25000); 
     const raw = safeParse(response.text, []);
@@ -274,9 +284,16 @@ export const generateProductsFromImages = async (base64Images: string[], mimeTyp
     const parts = base64Images.map(data => ({ inlineData: { data, mimeType } }));
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3.5-flash',
-      contents: { parts: [...parts, { text: `Identify visible products or gear for a "${category || 'General'}" project. 
-      PRIORITIZE RECALL: Identify ALL potentially visible tools, hardware, or materials. Do not be overly restrictive; if something looks like a specific tool, include it as an exploratory match.
-      Provide technical specifications where possible. Return JSON.` }] },
+      contents: { parts: [...parts, { text: `You are a specialist in ${category || 'General'} projects only.
+
+STRICT CATEGORY RULES:
+- ONLY return tools, materials, and products that belong to the declared category: "${category || 'General'}".
+- If the video/page content does NOT match the declared category, or contains no relevant physical tools/materials, return an empty array [] immediately.
+- Do NOT guess or pull tools from other trades (e.g. no drywall tools for plumbing, no woodworking for electrical, etc.).
+
+Identify visible products or gear for a "${category || 'General'}" project. 
+PRIORITIZE RECALL: Identify ALL potentially visible tools, hardware, or materials. Do not be overly restrictive; if something looks like a specific tool, include it as an exploratory match.
+Provide technical specifications where possible. Return JSON.` }] },
       config: { responseMimeType: "application/json", responseSchema: productSchema },
     }), 30000); 
     const raw = safeParse(response.text, []);
@@ -303,11 +320,21 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
     
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3.5-flash',
-      contents: `Analyze this tutorial/page: ${url}. 
-      The user has categorized this as: "${category || 'General'}".
-      Identify ALL primary products, gear items, or materials discussed. 
-      PRIORITIZE RECALL: It is better to have a generic or approximate match than to miss an item mentioned in the content. Surfaces 5-8 recommendations.
-      Return as JSON with technical specs.`,
+      contents: `You are a specialist in ${category || 'General'} projects only.
+
+STRICT CATEGORY RULES:
+- ONLY return tools, materials, and products that belong to the declared category: "${category || 'General'}".
+- If the video/page content does NOT match the declared category, or contains no relevant physical tools/materials, return an empty array [] immediately.
+- Do NOT guess or pull tools from other trades (e.g. no drywall tools for plumbing, no woodworking for electrical, etc.).
+
+Video/Project: "${url}"
+Category: "${category || 'General'}"
+
+Analyze this tutorial/page: ${url}. 
+The user has categorized this as: "${category || 'General'}".
+Identify ALL primary products, gear items, or materials discussed. 
+PRIORITIZE RECALL: It is better to have a generic or approximate match than to miss an item mentioned in the content. Surfaces 5-8 recommendations.
+Return as JSON with technical specs.`,
       config: { 
         tools: [{ urlContext: {} }],
         responseMimeType: "application/json",
@@ -367,7 +394,10 @@ export const generateV3ProjectInsights = async (title: string, products: Product
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3.1-pro-preview', // Upgraded to Pro for better reasoning on safety and costs
-      contents: `Audit: "${title}". Materials: ${products.map(p => p.name).join(', ')}.`,
+      contents: `You are an expert project inspector/auditor.
+You are a specialist in "${category || 'General'}" projects only. Keep all safety, difficulty, and cost evaluations focused STRICTLY within "${category || 'General'}". Do NOT reference unrelated disciplines, materials or other trades.
+
+Audit: "${title}". Materials: ${products.map(p => p.name).join(', ')}.`,
       config: { responseMimeType: "application/json", responseSchema: insightSchema },
     }), 25000); // Increased timeout for Pro model
     return safeParse(response.text, {} as ProjectInsights);
@@ -471,10 +501,20 @@ export const generateDeepDiveProducts = async (videoTitle: string, existing: Pro
         const existingNames = existing.map(p => p.name).join(", ");
         const response = await withTimeout(ai.models.generateContent({
             model: 'gemini-3.5-flash',
-            contents: `The project is "${videoTitle}" in the category "${category || 'General'}".
-            Existing items already found: [${existingNames}].
-            Perform a "DEEP DIVE" to identify 3-5 ADVANCED, SPECIALIZED, or PROFESSIONAL-LEVEL tools or hardware that would enhance this project or are often missed by beginners.
-            Return as JSON.`,
+            contents: `You are a specialist in ${category || 'General'} projects only.
+
+STRICT CATEGORY RULES:
+- ONLY return tools, materials, and products that belong to the declared category: "${category || 'General'}".
+- If the video/page content does NOT match the declared category, or contains no relevant physical tools/materials, return an empty array [] immediately.
+- Do NOT guess or pull tools from other trades (e.g. no drywall tools for plumbing, no woodworking for electrical, etc.).
+
+Video/Project: "${videoTitle}"
+Category: "${category || 'General'}"
+
+The project is "${videoTitle}" in the category "${category || 'General'}".
+Existing items already found: [${existingNames}].
+Perform a "DEEP DIVE" to identify 3-5 ADVANCED, SPECIALIZED, or PROFESSIONAL-LEVEL tools or hardware that would enhance this project or are often missed by beginners.
+Return as JSON.`,
             config: { responseMimeType: "application/json", responseSchema: productSchema },
         }), 35000);
         const raw = safeParse(response.text, []);

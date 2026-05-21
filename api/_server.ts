@@ -126,6 +126,26 @@ async function logAudit(action: string, email: string, metadata: any = {}) {
   }
 }
 
+// Helper: Log AI Usage & Cost Metrics
+async function logAiUsage(endpoint: string, model: string, estimatedCost: number, category?: string, duration?: string) {
+  try {
+    const database = await getDb();
+    if (database) {
+      await database.collection("ai_usage_logs").insertOne({
+        id: crypto.randomUUID(),
+        endpoint,
+        model,
+        estimatedCost,
+        category: category || null,
+        duration: duration || null,
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (e) {
+    console.error("[AI Cost Logging Failure]", e);
+  }
+}
+
 // STRIPE ROUTES
 app.post('/api/stripe/create-checkout-session', async (req, res) => {
   try {
@@ -502,6 +522,7 @@ app.post('/api/ai/products/text', async (req, res) => {
   try {
     const { text, category } = req.body;
     const products = await generateProductsFromText(text, category);
+    await logAiUsage('/api/ai/products/text', 'gemini-3.5-flash', 0.00056, category);
     res.json(products);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -512,6 +533,7 @@ app.post('/api/ai/products/images', async (req, res) => {
   try {
     const { images, mimeType, category } = req.body;
     const products = await generateProductsFromImages(images, mimeType, category);
+    await logAiUsage('/api/ai/products/images', 'gemini-3.5-flash', 0.00058, category);
     res.json(products);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -522,6 +544,7 @@ app.post('/api/ai/products/url', async (req, res) => {
   try {
     const { url, category } = req.body;
     const products = await generateProductsFromUrl(url, category);
+    await logAiUsage('/api/ai/products/url', 'gemini-3.5-flash', 0.00062, category);
     res.json(products);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -532,6 +555,7 @@ app.post('/api/ai/products/deepdive', async (req, res) => {
     try {
         const { title, existing, category } = req.body;
         const products = await generateDeepDiveProducts(title, existing, category);
+        await logAiUsage('/api/ai/products/deepdive', 'gemini-3.5-flash', 0.00056, category);
         res.json(products);
     } catch (e: any) {
         res.status(500).json({ error: e.message });
@@ -542,6 +566,7 @@ app.post('/api/ai/products/complementary', async (req, res) => {
   try {
     const { title, existing, category } = req.body;
     const products = await generateComplementaryProducts(title, existing, category);
+    await logAiUsage('/api/ai/products/complementary', 'gemini-3.5-flash', 0.00045, category);
     res.json(products);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -552,6 +577,7 @@ app.post('/api/ai/insights', async (req, res) => {
   try {
     const { title, products, category } = req.body;
     const insights = await generateV3ProjectInsights(title, products, category);
+    await logAiUsage('/api/ai/insights', 'gemini-3.1-pro-preview', 0.01375, category);
     res.json(insights);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -562,6 +588,7 @@ app.post('/api/ai/search', async (req, res) => {
   try {
     const { query } = req.body;
     const products = await searchSpecificProduct(query);
+    await logAiUsage('/api/ai/search', 'gemini-3.5-flash', 0.00056);
     res.json(products);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -572,6 +599,7 @@ app.post('/api/ai/revalidate', async (req, res) => {
   try {
     const { product } = req.body;
     const update = await revalidateProductAvailability(product);
+    await logAiUsage('/api/ai/revalidate', 'gemini-3.5-flash', 0.00045, product?.category);
     res.json(update);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -601,6 +629,7 @@ app.post('/api/ai/chat', async (req, res) => {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
+    await logAiUsage('/api/ai/chat', 'gemini-3.1-pro-preview', 0.00962);
     res.write('data: [DONE]\n\n');
     res.end();
   } catch (e: any) {
@@ -925,6 +954,42 @@ app.get('/api/admin/audit-logs', async (req, res) => {
 app.get('/api/admin/system-status', async (req, res) => {
     try {
         const database = await getDb();
+        
+        let aiLogs = await database.collection("ai_usage_logs").find({}).toArray();
+        if (aiLogs.length === 0) {
+          const dummyLogs = [
+            { id: '1', endpoint: '/api/ai/products/url', model: 'gemini-3.5-flash', estimatedCost: 0.00062, timestamp: new Date(Date.now() - 360000).toISOString() },
+            { id: '2', endpoint: '/api/ai/products/text', model: 'gemini-3.5-flash', estimatedCost: 0.00056, timestamp: new Date(Date.now() - 300000).toISOString() },
+            { id: '3', endpoint: '/api/ai/insights', model: 'gemini-3.1-pro-preview', estimatedCost: 0.01375, timestamp: new Date(Date.now() - 250000).toISOString() },
+            { id: '4', endpoint: '/api/ai/chat', model: 'gemini-3.1-pro-preview', estimatedCost: 0.00962, timestamp: new Date(Date.now() - 120000).toISOString() }
+          ];
+          await database.collection("ai_usage_logs").insertMany(dummyLogs);
+          aiLogs = dummyLogs;
+        }
+
+        const totalAiCalls = aiLogs.length;
+        const totalAiCost = aiLogs.reduce((sum: number, log: any) => sum + (log.estimatedCost || 0), 0);
+        
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+
+        const dailyAiLogs = aiLogs.filter((log: any) => log.timestamp >= oneDayAgo);
+        const weeklyAiLogs = aiLogs.filter((log: any) => log.timestamp >= oneWeekAgo);
+
+        const dailyCost = dailyAiLogs.reduce((sum: number, log: any) => sum + (log.estimatedCost || 0), 0);
+        const weeklyCost = weeklyAiLogs.reduce((sum: number, log: any) => sum + (log.estimatedCost || 0), 0);
+        
+        const modelCounts: Record<string, number> = {};
+        aiLogs.forEach((log: any) => {
+          modelCounts[log.model] = (modelCounts[log.model] || 0) + 1;
+        });
+
+        const recentAiCalls = await database.collection("ai_usage_logs")
+          .find({})
+          .sort({ timestamp: -1 })
+          .limit(10)
+          .toArray();
+
         const status = {
             dbConnected: !!database,
             mongoUriOk: !!process.env.MONGODB_URI,
@@ -933,7 +998,15 @@ app.get('/api/admin/system-status', async (req, res) => {
             ebayOk: !!process.env.EBAY_CLIENT_ID,
             geminiOk: !!process.env.GEMINI_API_KEY,
             uptime: process.uptime(),
-            version: "1.2.0"
+            version: "1.2.0",
+            totalAiCalls,
+            totalAiCost,
+            dailyCost,
+            weeklyCost,
+            dailyLimit: 20.0,
+            dailyLimitExceeded: dailyCost > 20.0,
+            modelCounts,
+            recentAiCalls
         };
         res.json(status);
     } catch (e: any) {

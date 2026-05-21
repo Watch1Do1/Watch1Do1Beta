@@ -19,7 +19,14 @@ const CATEGORIES: ProjectCategory[] = [
   'Art & Photography', 'Hobbies', 'Other'
 ];
 
-const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+const TIER_LIMITS = {
+  Free: { sizeMB: 50, durationMins: 10, label: 'Free Tier' },
+  Plus: { sizeMB: 200, durationMins: 30, label: 'Plus Tier' },
+  Pro: { sizeMB: 500, durationMins: 60, label: 'Pro Tier' },
+  Studio: { sizeMB: 1000, durationMins: 120, label: 'Studio Tier' },
+  Partner: { sizeMB: Infinity, durationMins: Infinity, label: 'Verified Partner' }
+};
+
 const DESCRIPTION_LIMIT = 500;
 
 const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading, loadingMessage, currentUser, onNavigate }) => {
@@ -44,6 +51,12 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading,
   const modalHeaderRef = useRef<HTMLDivElement>(null);
 
   const isVerified = currentUser?.isVerifiedPartner;
+
+  const userTier: 'Free' | 'Plus' | 'Pro' | 'Studio' | 'Partner' = 
+    (currentUser?.isVerifiedPartner || currentUser?.isPartner || currentUser?.isAdmin) ? 'Partner' :
+    (currentUser?.subscriptionStatus || 'Free');
+
+  const limits = TIER_LIMITS[userTier];
 
   // AGGRESSIVE SCROLL LOCK: Resets scroll to top after browser layout and autofocus
   useLayoutEffect(() => {
@@ -107,8 +120,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading,
         setError('Format Error: Please select a valid video stream.');
         return;
     }
-    if (selectedFile.size > MAX_FILE_SIZE) {
-        setError('Size Error: Media payload exceeds 500MB limit.');
+    const limitMB = limits.sizeMB;
+    if (limitMB !== Infinity && selectedFile.size > limitMB * 1024 * 1024) {
+        setError(`Upload Blocked: Your ${limits.label} limits media file sizes to ${limitMB}MB. Upgrade your plan to unlock more.`);
         return;
     }
     setFile(selectedFile);
@@ -151,6 +165,16 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading,
     const vid = e.currentTarget;
     const mins = Math.floor(vid.duration / 60);
     const secs = Math.floor(vid.duration % 60);
+    
+    const durationLimitMins = limits.durationMins;
+    if (durationLimitMins !== Infinity && vid.duration > durationLimitMins * 60) {
+        setError(`Upload Blocked: Your ${limits.label} limits video duration to ${durationLimitMins} minutes. Selected duration: ${mins}m ${secs}s.`);
+        setFile(null);
+        setDuration(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+    }
+    
     setDuration(`${mins}:${secs.toString().padStart(2, '0')}`);
   };
 
@@ -265,7 +289,22 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading,
                         <div className="py-6">
                             <UploadIcon className={`w-12 h-12 mx-auto mb-6 transition-all ${isDragging ? 'text-[#7D8FED] scale-110' : 'text-slate-700 group-hover:text-slate-500'}`} />
                             <p className="text-slate-400 font-black text-xl mb-1 tracking-tight">Sync Media Stream</p>
-                            <p className="text-slate-600 text-[10px] uppercase font-black tracking-widest">Drop tutorial footage or click to explore</p>
+                            <p className="text-slate-600 text-[10px] uppercase font-black tracking-widest leading-relaxed">Drop tutorial footage or click to explore</p>
+                            <div className="mt-4 px-4 py-2.5 rounded-2xl bg-[#7D8FED]/5 border border-[#7D8FED]/10 inline-block max-w-[420px] pointer-events-auto">
+                              <p className="text-[#7D8FED] text-[9.5px] uppercase font-black tracking-widest leading-none block mb-1">
+                                {limits.label} limits active
+                              </p>
+                              <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider leading-relaxed">
+                                {limits.sizeMB === Infinity ? 'Unlimited file size' : `Max size is ${limits.sizeMB}MB`}
+                                {' • '}
+                                {limits.durationMins === Infinity ? 'Unlimited video length' : `Max duration is ${limits.durationMins} mins`}.
+                                {limits.sizeMB !== Infinity && (
+                                  <span className="text-[#7D8FED] font-black hover:underline cursor-pointer ml-1 inline-block mt-0.5" onClick={(e) => { e.stopPropagation(); onClose(); onNavigate && onNavigate('subscription'); }}>
+                                    ✨ Upgrade plan to unlock larger uploads
+                                  </span>
+                                )}
+                              </p>
+                            </div>
                         </div>
                     )}
                   </div>

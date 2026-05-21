@@ -25,6 +25,7 @@ import TermsOfService from './components/TermsOfService';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import AffiliateDisclosure from './components/AffiliateDisclosure';
 import AffiliateGuide from './components/AffiliateGuide';
+import BetaNotificationModal from './components/BetaNotificationModal';
 import { 
     generateProductsFromText, 
     generateProductsFromImages, 
@@ -122,9 +123,17 @@ const App: React.FC = () => {
   const [sourcingKit, setSourcingKit] = useState<CartItem[]>([]);
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [pendingAnalysis, setPendingAnalysis] = useState<{ type: UploadType, val: File[] | string, cat: ProjectCategory } | null>(null);
+  const [isBetaModalOpen, setBetaModalOpen] = useState(false);
   
   const loadingIntervalRef = useRef<number | null>(null);
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const dismissed = localStorage.getItem('watch1do1_beta_dismissed_2026');
+    if (!dismissed) {
+      setBetaModalOpen(true);
+    }
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -813,6 +822,13 @@ const App: React.FC = () => {
         
         {sourcingKit.length > 0 && <SourcingRedirectModal items={sourcingKit} onClose={() => setSourcingKit([])} />}
         {isEmailModalOpen && <EmailKitModal items={planningKit} projectTitle={selectedVideo?.title || "Watch1Do1 Project"} onClose={() => setIsEmailModalOpen(false)} onSend={async (email) => { await emailService.sendEmailKit(email, selectedVideo?.title || "Kit", planningKit); }} />}
+        
+        {isBetaModalOpen && (
+          <BetaNotificationModal 
+            currentUserEmail={currentUser?.email} 
+            onClose={() => setBetaModalOpen(false)} 
+          />
+        )}
 
         {xpNotification && (
             <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-800 border border-[#7D8FED]/40 px-8 py-5 rounded-3xl shadow-2xl flex items-center gap-6 animate-scale-in">

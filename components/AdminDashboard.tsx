@@ -103,6 +103,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [purchaseData, setPurchaseData] = useState<Purchase[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(currentUser.lastSyncAt || new Date().toISOString());
+  const [dailyThreshold, setDailyThreshold] = useState<number>(20.0);
 
   // Rejection/Flag parameters
   const [rejectReason, setRejectReason] = useState('Content Standards');
@@ -1359,6 +1360,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
 
                   {systemStatus ? (
+                      <>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-mono text-[10.5px]">
                           <div className="p-6 bg-slate-900 border border-slate-800 rounded-[2rem] space-y-4">
                               <h4 className="text-xs font-black text-white font-sans uppercase tracking-widest">Base Layer Connectivity</h4>
@@ -1426,6 +1428,163 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </div>
                           </div>
                       </div>
+
+                      {/* GEMINI API BILLING & USAGE INTERFACE */}
+                      
+                      {/* Dynamic Soft budget alert based on customizable threshold */}
+                      {systemStatus && (systemStatus.dailyCost || 0) > dailyThreshold && (
+                          <div className="p-6 bg-rose-500/10 border border-rose-500/25 rounded-3xl text-left space-y-2 mb-6 animate-fade-in">
+                              <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+                                  <h4 className="text-xs font-black text-rose-500 uppercase tracking-widest font-sans">AI Daily Budget Warning Alarm</h4>
+                              </div>
+                              <p className="text-xs text-slate-350 font-medium leading-relaxed font-sans">
+                                  Your current daily cost of <strong className="text-white font-mono">${(systemStatus.dailyCost || 0).toFixed(5)}</strong> is exceeding your customizable warning threshold of <strong className="text-white font-mono">${dailyThreshold.toFixed(2)}/day</strong>. Optimize prompt patterns or reduce image analytical submissions to control billing.
+                              </p>
+                          </div>
+                      )}
+
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mt-6">
+                          
+                          {/* Cost Counters, Settings and Mini Chart */}
+                          <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 lg:p-8 space-y-6 flex flex-col justify-between">
+                              <div className="space-y-6">
+                                  <div>
+                                      <h3 className="text-sm font-black text-white uppercase tracking-wider font-sans">Gemini API Billing Analytics</h3>
+                                      <p className="text-[9px] font-black uppercase tracking-widest text-[#7D8FED] mt-1 font-sans">AI API Execution costs</p>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-4">
+                                      <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-850/80 text-center space-y-1">
+                                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none block">Today (24h)</span>
+                                          <p className="text-xl font-black text-white tracking-tighter font-mono">${(systemStatus.dailyCost || 0).toFixed(5)}</p>
+                                      </div>
+                                      <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-850/80 text-center space-y-1">
+                                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none block">Weekly (7d)</span>
+                                          <p className="text-xl font-black text-white tracking-tighter font-mono">${(systemStatus.weeklyCost || 0).toFixed(5)}</p>
+                                      </div>
+                                  </div>
+
+                                  <div className="bg-slate-950/60 p-6 rounded-2xl border border-slate-850/80 text-center space-y-2">
+                                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none block">Accumulated Billing Cost</span>
+                                      <p className="text-4xl font-black text-white tracking-tighter font-mono">${(systemStatus.totalAiCost || 0).toFixed(5)}</p>
+                                      <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">
+                                          Total API runs: {systemStatus.totalAiCalls || 0} calls
+                                      </p>
+                                  </div>
+
+                                  {/* Custom Threshold Slider */}
+                                  <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-850 space-y-2 text-left">
+                                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider">
+                                          <span className="text-slate-450">Set Budget Limit:</span>
+                                          <span className="text-[#7D8FED] font-mono font-black">${dailyThreshold.toFixed(2)}/day</span>
+                                      </div>
+                                      <input 
+                                          type="range" 
+                                          min="0.10" 
+                                          max="20.00" 
+                                          step="0.10" 
+                                          value={dailyThreshold} 
+                                          onChange={(e) => setDailyThreshold(parseFloat(e.target.value))}
+                                          className="w-full accent-[#7D8FED] bg-slate-950 rounded-lg cursor-pointer h-1.5"
+                                      />
+                                      <div className="flex justify-between text-[7px] text-slate-500 font-bold uppercase tracking-widest">
+                                          <span>$0.10/day</span>
+                                          <span>$20.00/day</span>
+                                      </div>
+                                  </div>
+
+                                  {/* Simple Cost progress bars visual chart */}
+                                  <div className="bg-slate-950/30 p-4 rounded-2xl border border-slate-850 space-y-4 text-left">
+                                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block font-sans">
+                                          Budget Allocation Graphs
+                                      </span>
+                                      
+                                      {/* Daily Usage ProgressBar */}
+                                      <div className="space-y-1">
+                                          <div className="flex justify-between text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+                                              <span>Daily warning usage</span>
+                                              <span className="text-slate-355 font-mono">
+                                                  {Math.min(100, Math.round(((systemStatus.dailyCost || 0) / dailyThreshold) * 100))}%
+                                              </span>
+                                          </div>
+                                          <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-850">
+                                              <div 
+                                                  className={`h-full rounded-full transition-all duration-500 ${
+                                                      (systemStatus.dailyCost || 0) > dailyThreshold ? 'bg-rose-500' : 'bg-[#7D8FED]'
+                                                  }`}
+                                                  style={{ width: `${Math.min(100, ((systemStatus.dailyCost || 0) / dailyThreshold) * 100)}%` }}
+                                              />
+                                          </div>
+                                      </div>
+
+                                      {/* Weekly Usage ProgressBar (Relative to $50 Warning threshold) */}
+                                      <div className="space-y-1">
+                                          <div className="flex justify-between text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+                                              <span>Weekly target ($50.00)</span>
+                                              <span className="text-slate-355 font-mono">
+                                                  {Math.min(100, Math.round(((systemStatus.weeklyCost || 0) / 50.0) * 100))}%
+                                              </span>
+                                          </div>
+                                          <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-850">
+                                              <div 
+                                                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                                                  style={{ width: `${Math.min(100, ((systemStatus.weeklyCost || 0) / 50.0) * 100)}%` }}
+                                              />
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+
+                              <p className="text-[8px] font-medium leading-relaxed uppercase tracking-widest text-slate-500 text-center mt-4">
+                                  Model pricing weighting calculated based on commercial standards.
+                              </p>
+                          </div>
+
+                          {/* Recent AI Call Logs stream list */}
+                          <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-[2.5rem] p-6 lg:p-8 space-y-6">
+                              <div>
+                                  <h3 className="text-sm font-black text-white uppercase tracking-wider font-sans">Recent AI Execution Streams</h3>
+                                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5 font-bold font-sans">Real-time prompt request tracing metrics</p>
+                              </div>
+
+                              <div className="space-y-3 font-mono text-[10px]">
+                                  {!(systemStatus.recentAiCalls?.length) ? (
+                                      <p className="text-slate-500 py-10 text-center uppercase tracking-widest">Awaiting prompt dispatch event...</p>
+                                  ) : (
+                                      systemStatus.recentAiCalls.map((log: any, idx: number) => (
+                                          <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-950/80 border border-slate-850 rounded-2xl gap-2 hover:border-slate-750 transition-colors">
+                                              <div className="flex flex-col sm:flex-row sm:items-center gap-3 text-left">
+                                                  <span className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 text-[#7D8FED] rounded uppercase text-[8px] tracking-wide shrink-0">
+                                                      {log.model}
+                                                  </span>
+                                                  <div className="flex flex-col">
+                                                      <span className="text-slate-300 font-bold tracking-tight truncate max-w-xs sm:max-w-md">
+                                                          {log.endpoint}
+                                                      </span>
+                                                      {log.category && (
+                                                          <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider mt-0.5">
+                                                              Inspected Category: <span className="text-[#7D8FED] font-black">{log.category}</span>
+                                                          </span>
+                                                      )}
+                                                  </div>
+                                              </div>
+                                              <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0">
+                                                  <span className="text-slate-500 shrink-0 text-[9px]">
+                                                      {log.timestamp?.slice(11, 19) || 'N/A'}
+                                                  </span>
+                                                  <span className="text-emerald-400 font-bold bg-emerald-500/5 border border-emerald-500/10 px-2 py-0.5 rounded text-[9.5px]">
+                                                      +${(log.estimatedCost || 0).toFixed(5)}
+                                                  </span>
+                                              </div>
+                                          </div>
+                                      ))
+                                  )}
+                              </div>
+                          </div>
+
+                      </div>
+                      </>
                   ) : (
                       <div className="py-20 text-center bg-slate-900 border border-slate-800 rounded-[2.5rem]">
                           <RefreshCwIcon className="w-10 h-10 animate-spin text-[#7D8FED] mx-auto mb-4" />
