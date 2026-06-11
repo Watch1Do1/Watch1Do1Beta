@@ -28,7 +28,7 @@ import {
   PlayIcon, 
   MedalIcon 
 } from './IconComponents';
-import { PLATFORM_DEFAULT_CAMPID, searchSpecificProduct } from '../services/geminiService';
+import { PLATFORM_DEFAULT_CAMPID, searchSpecificProduct, generateProductsFromUrl } from '../services/geminiService';
 import { searchEbay } from '../services/ebayService';
 import { dbService } from '../services/dbService';
 
@@ -118,6 +118,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isSearchingProduct, setIsSearchingProduct] = useState(false);
   const [discoveryQuery, setDiscoveryQuery] = useState('');
   const [discoveryCandidates, setDiscoveryCandidates] = useState<Product[]>([]);
+  const [discoveryError, setDiscoveryError] = useState('');
 
   useEffect(() => {
     const fetchIntelligence = async () => {
@@ -364,19 +365,60 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleDiscovery = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!discoveryQuery.trim()) return;
+    const query = discoveryQuery.trim();
+    if (!query) return;
     setIsSearchingProduct(true);
     setDiscoveryCandidates([]);
+    setDiscoveryError('');
     try {
-        const [aiResults, ebayResults] = await Promise.all([
-            searchSpecificProduct(discoveryQuery).catch(() => [] as Product[]),
-            searchEbay(discoveryQuery, 5).catch(() => [] as Product[])
-        ]);
+        let isUrl = false;
+        try {
+            const tempUrl = query.startsWith('http') ? query : `https://${query}`;
+            const parsed = new URL(tempUrl);
+            isUrl = parsed.hostname.includes('.') && parsed.hostname.length > 3;
+        } catch (e) {
+            isUrl = false;
+        }
         
-        const combined = [...ebayResults, ...aiResults.filter(ai => !ebayResults.some(eb => eb.name.toLowerCase() === ai.name.toLowerCase()))];
-        setDiscoveryCandidates(combined);
-    } catch (e) { 
-        alert("Search error."); 
+        if (isUrl) {
+            const cleanUrl = query.startsWith('http') ? query : `https://${query}`;
+            const results = await generateProductsFromUrl(cleanUrl, selectedVideo?.category).catch(() => [] as Product[]);
+            if (results && results.length > 0) {
+                const cleaned = results.map(p => ({
+                    ...p,
+                    purchaseUrl: p.purchaseUrl || cleanUrl
+                }));
+                setDiscoveryCandidates(cleaned);
+                
+                // Spot fallback parsing which indicates Gemini's API key is expired or degraded
+                const hasFallback = cleaned.some(cand => cand.evaluation && cand.evaluation.includes('Spliced directly from active product link'));
+                if (hasFallback) {
+                    setDiscoveryError("Your Gemini API Key has expired or is invalid. Sourced item details using the fallback offline URL parser. Please renew the API Key in your AI Studio Settings.");
+                }
+            } else {
+                setDiscoveryError("Vision AI did not find any physical materials or tools on that page.");
+            }
+        } else {
+            const [aiResults, ebayResults] = await Promise.all([
+                searchSpecificProduct(query).catch((e) => {
+                    const msg = e?.message || '';
+                    if (msg.toLowerCase().includes('api key') || msg.toLowerCase().includes('expired')) {
+                        setDiscoveryError("Your Gemini API Key has expired or is invalid. Please renew the API Key in your AI Studio Settings.");
+                    }
+                    return [] as Product[];
+                }),
+                searchEbay(query, 5).catch(() => [] as Product[])
+            ]);
+            
+            const combined = [...ebayResults, ...aiResults.filter(ai => !ebayResults.some(eb => eb.name.toLowerCase() === ai.name.toLowerCase()))];
+            setDiscoveryCandidates(combined);
+            if (combined.length === 0) {
+                setDiscoveryError("No matching listings were discovered in eBay catalogs or AI records.");
+            }
+        }
+    } catch (err: any) { 
+        console.error("Discovery error:", err);
+        setDiscoveryError(err.message || "Search execution failed."); 
     } finally { 
         setIsSearchingProduct(false); 
     }
@@ -744,6 +786,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                               {isSearchingProduct ? 'Searching...' : 'Locate'}
                                           </button>
                                       </form>
+
+                                      {discoveryError && (
+                                          <div className="bg-rose-950/40 p-3.5 rounded-xl border border-rose-500/25 text-rose-300 text-[9.5px] font-semibold leading-relaxed">
+                                              {discoveryError}
+                                          </div>
+                                      )}
 
                                       {discoveryCandidates.length > 0 && (
                                           <div className="border-t border-slate-904 pt-4 space-y-2.5 max-h-64 overflow-y-auto pr-1">

@@ -5,6 +5,7 @@ import { dbService } from '../services/dbService';
 import ProductCard from './ProductCard';
 import ChatInterface from './ChatInterface';
 import ProjectInsights from './ProjectInsights';
+import AddProductModal from './AddProductModal';
 import { searchSpecificProduct, revalidateProductAvailability, generateDeepDiveProducts } from '../services/geminiService';
 import { SparkleIcon, ArrowLeftIcon, HeartIcon, ShoppingCartIcon, MessageCircleIcon, BarChartIcon, SearchIcon, PlusIcon, RefreshCwIcon, CheckCircleIcon, MedalIcon, TrophyIcon, CameraIcon, PhotoIcon, DollarSignIcon, UserIcon, ShieldIcon, EyeIcon, XCircleIcon, ShareIcon, TrashIcon, SendIcon } from './IconComponents';
 
@@ -63,6 +64,7 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
   const [foundProducts, setFoundProducts] = useState<Product[]>([]);
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'done' | 'error'>('idle');
   const [revalidatingIds, setRevalidatingIds] = useState<string[]>([]);
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   
   // Reporting State
   const [showReportModal, setShowReportModal] = useState(false);
@@ -602,6 +604,16 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
                                   <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                                   <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-[#7D8FED] rounded-xl text-white shadow-lg">{isSearchingMarket ? <RefreshCwIcon className="w-4 h-4 animate-spin" /> : <PlusIcon className="w-4 h-4" />}</button>
                               </form>
+                              
+                              <button 
+                                  type="button" 
+                                  onClick={() => setIsAddProductModalOpen(true)}
+                                  className="w-full py-3.5 bg-slate-900 border border-slate-700 hover:border-[#7D8FED]/40 rounded-2xl text-[9px] font-black text-[#7D8FED] uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:bg-slate-950/40"
+                              >
+                                  <PlusIcon className="w-3.5 h-3.5" />
+                                  Custom Entry / URL Import (RAG)
+                              </button>
+
                               {foundProducts.length > 0 && <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar">{foundProducts.map(p => <div key={p.id} className="bg-slate-900 border-2 border-slate-700 rounded-2xl p-4 flex items-center justify-between group"><div className="flex items-center gap-4 min-w-0"><img src={p.imageUrl} className="w-12 h-12 rounded-lg object-cover" alt="" /><div className="min-w-0"><p className="text-xs font-black text-white truncate">{p.name}</p><p className="text-[10px] font-black text-[#7D8FED]">{formatPrice(p.price)}</p></div></div><button onClick={() => handleSelectProduct(p)} className="px-4 py-2 bg-emerald-600 rounded-xl text-white text-[9px] font-black uppercase">Select</button></div>)}</div>}
                           </div>
                       )}
@@ -667,6 +679,19 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
           </div>
         </div>
       </div>
+      {isAddProductModalOpen && (
+          <AddProductModal 
+              onClose={() => setIsAddProductModalOpen(false)}
+              onAddProduct={(p) => {
+                  onAddFoundProduct(p);
+                  setLocalVideo(prev => ({
+                      ...prev,
+                      products: [...prev.products, p]
+                  }));
+              }}
+              category={localVideo.category}
+          />
+      )}
     </div>
   );
 };

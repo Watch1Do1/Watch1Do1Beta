@@ -23,7 +23,7 @@ async function getEbayToken(): Promise<string> {
 
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
-  const response = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+  let response = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -36,8 +36,25 @@ async function getEbayToken(): Promise<string> {
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to get eBay token: ${error}`);
+    const errorText = await response.text();
+    if (errorText.includes('invalid_scope')) {
+      console.warn(`[eBay Auth] Scope '${scope}' rejected with invalid_scope. Retrying without scope parameter to fetch all allowed scopes...`);
+      response = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${auth}`,
+        },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+        }),
+      });
+    }
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to get eBay token: ${error}`);
+    }
   }
 
   const data = await response.json() as any;

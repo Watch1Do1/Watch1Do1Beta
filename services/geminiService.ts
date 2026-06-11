@@ -19,6 +19,7 @@ export const asMoney = (priceStr: string | number): Money => {
 };
 
 const sessionCache = new Map<string, any>();
+let cachedEbayApiDenied = false;
 
 const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
     return Promise.race([
@@ -115,11 +116,30 @@ const routeProductDiscovery = async (p: any): Promise<Product> => {
     const cacheKey = `p_${uniqueId}`;
     if (sessionCache.has(cacheKey)) return sessionCache.get(cacheKey);
 
+    // If this is a specific URL Import or Custom Curation, preserve original details and skip discovery
+    if (p.isUrlImport || p.sourceType === 'manual') {
+        const result: Product = {
+            ...p,
+            id: uniqueId,
+            price: asMoney(p.price),
+            available: true,
+            stockStatus: 'in-stock',
+            imageUrl: p.imageUrl || `https://picsum.photos/seed/${encodeURIComponent(p.name)}/400/400`,
+            purchaseUrl: p.purchaseUrl,
+            reviewsUrl: p.reviewsUrl || `https://www.google.com/search?q=${encodeURIComponent(p.name + " reviews")}`,
+            isPartnerProduct: false,
+            sourceType: 'manual',
+            isCreatorDeclared: true
+        };
+        sessionCache.set(cacheKey, result);
+        return result;
+    }
+
     // Use eBay Browse API for direct merchant matches
     try {
         let ebayResults = [];
         if (isServer) {
-            const { searchEbayItems } = await import(/* @vite-ignore */ "./ebayBrowseService.js");
+            const { searchEbayItems } = await import("./ebayBrowseService.js");
             ebayResults = await searchEbayItems(p.name, 1);
         } else {
             const res = await fetch(`/api/ebay/search?q=${encodeURIComponent(p.name)}&limit=1`);
@@ -304,6 +324,382 @@ Provide technical specifications where possible. Return JSON.` }] },
   }
 };
 
+export interface CrawledPageData {
+  contentText: string;
+  title: string;
+  description: string;
+  ogImage: string;
+  priceAmount: string;
+}
+
+export function extractPriceFromHtml(html: string): string {
+  // First clean common HTML entities to make regex matching extremely stable on escaping environments like search XML feeds
+  const cleanHtml = html
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#36;/g, '$')
+    .replace(/&#x24;/g, '$')
+    .replace(/&pound;/g, '£')
+    .replace(/&#163;/g, '£')
+    .replace(/&euro;/g, '€')
+    .replace(/&#8364;/g, '€')
+    .replace(/&#x20ac;/g, '€')
+    .replace(/&#165;/g, '¥');
+
+  // 1. High-Priority specific Meta Tags
+  const metaRegexes = [
+    /<meta[^>]+(?:property|name)=['"]product:price:amount['"][^>]+content=['"]([^'"]+)['"]/gi,
+    /<meta[^>]+content=['"]([^'"]+)['"][^>]+(?:property|name)=['"]product:price:amount['"]/gi,
+    /<meta[^>]+(?:property|name)=['"]price:amount['"][^>]+content=['"]([^'"]+)['"]/gi,
+    /<meta[^>]+content=['"]([^'"]+)['"][^>]+(?:property|name)=['"]price:amount['"]/gi,
+    /<meta[^>]+(?:property|name)=['"]price['"][^>]+content=['"]([^'"]+)['"]/gi,
+    /<meta[^>]+content=['"]([^'"]+)['"][^>]+(?:property|name)=['"]price['"]/gi,
+  ];
+  for (const regex of metaRegexes) {
+    let match;
+    while ((match = regex.exec(cleanHtml)) !== null) {
+      const cleaned = match[1].replace(/[^0-9.]/g, '').trim();
+      const val = parseFloat(cleaned);
+      if (val > 0.05) {
+        return val.toFixed(2);
+      }
+    }
+  }
+
+  // 2. Specific Retailer/eBay primary selectors (handling $, £, €, C$, AU$, GBP, EUR currencies)
+  const retailerRegexes = [
+    /class=['"]x-price-primary['"][\s\S]*?(?:[\$\xA3\u20AC\u00A3\u20AC\xA5]|GBP|EUR|CAD|AUD|C\s*\$|AU\s*\$|US\s*\$)\s*([0-9,.]+)/gi,
+    /id=['"]prcIsum['"][| |^>]*>\s*(?:US\s*|GBP\s*|EUR\s*|C\s*|AU\s*)?(?:[\$\xA3\u20AC\u00A3\u20AC\xA5])?\s*([0-9,.]+)/gi,
+    /class=['"][^'"]*binPrice[^'"]*['"][^>]*>\s*(?:US\s*|GBP\s*|EUR\s*|C\s*|AU\s*)?(?:[\$\xA3\u20AC\u00A3\u20AC\xA5])?\s*([0-9,.]+)/gi,
+    /class=['"]ux-textspans['"][^>]*>\s*(?:US\s*|GBP\s*|EUR\s*|C\s*|AU\s*)?(?:[\$\xA3\u20AC\u00A3\u20AC\xA5])?\s*([0-9,.]+)/gi,
+  ];
+  for (const r of retailerRegexes) {
+    let match;
+    while ((match = r.exec(cleanHtml)) !== null) {
+      const cleaned = match[1].replace(/,/g, '').trim();
+      const val = parseFloat(cleaned);
+      if (val > 0.05) {
+        return val.toFixed(2);
+      }
+    }
+  }
+
+  // 3. Try JSON-LD schema price
+  const jsonLdMatches = [
+    /["']price["']\s*:\s*["']([0-9.,]+)["']/gi,
+    /["']price["']\s*:\s*([0-9.,]+)/gi,
+    /["']priceAmount["']\s*:\s*["']([0-9.,]+)["']/gi,
+    /["']priceAmount["']\s*:\s*([0-9.,]+)/gi,
+  ];
+  for (const regex of jsonLdMatches) {
+    let match;
+    while ((match = regex.exec(cleanHtml)) !== null) {
+      const cleaned = match[1].replace(/,/g, '').trim();
+      const val = parseFloat(cleaned);
+      if (val > 0.05) {
+        return val.toFixed(2);
+      }
+    }
+  }
+
+  // 4. Itemprop="price" element selectors
+  const itempropRegexes = [
+    /itemprop=['"]price['"][^>]+content=['"]([^'"]+)['"]/gi,
+    /content=['"]([^'"]+)['"][^>]+itemprop=['"]price['"]/gi,
+    /<[^>]*itemprop=['"]price['"][^>]*>\s*(?:US\s*|GBP\s*|EUR\s*|C\s*|AU\s*)?(?:[\$\xA3\u20AC\u00A3\u20AC\xA5])?\s*([0-9,.]+)/gi,
+  ];
+  for (const r of itempropRegexes) {
+    let match;
+    while ((match = r.exec(cleanHtml)) !== null) {
+      const cleaned = match[1].replace(/,/g, '').trim();
+      const val = parseFloat(cleaned);
+      if (val > 0.05) {
+        return val.toFixed(2);
+      }
+    }
+  }
+
+  // 5. Broader fallback: match values over some reasonable threshold and definitely skip 0.00
+  // Supports both decimal and integer amounts across various currencies
+  const genericPriceRegex = /(?:[\$\xA3\u20AC\u00A3\u20AC\xA5]|GBP|EUR|CAD|AUD|C\s*\$|AU\s*\$|US\s*\$)\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{2})?|[0-9]+\.[0-9]{2}|[0-9,]+)/gi;
+  let match;
+  while ((match = genericPriceRegex.exec(cleanHtml)) !== null) {
+    const cleaned = match[1].replace(/,/g, '').trim();
+    const val = parseFloat(cleaned);
+    if (val > 0.10) {
+      return val.toFixed(2);
+    }
+  }
+
+  return '';
+}
+
+export const fetchAndExtractPageContent = async (url: string): Promise<CrawledPageData> => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12-second socket limit
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Cache-Control': 'no-cache'
+      },
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP status ${response.status}`);
+    }
+    
+    const html = await response.text();
+    
+    // Extract head title
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    let title = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+    title = title
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+    
+    // Extract og:description or standard meta descriptions (support both attribute positions)
+    const descMatch = html.match(/<meta[^>]+(?:property|name)="[^"]*description"[^>]+content="([^"]+)"/i) ||
+                      html.match(/<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="[^"]*description"/i);
+    let description = descMatch ? descMatch[1].trim() : '';
+    description = description
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+
+    // Extract og:image or standard schema image (support both attribute positions)
+    const imageMatch = html.match(/<meta[^>]+(?:property|name)="[^"]*image"[^>]+content="([^"]+)"/i) ||
+                       html.match(/<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="[^"]*image"/i) ||
+                       html.match(/<meta[^>]+(?:property|name)="og:image"[^>]+content="([^"]+)"/i) ||
+                       html.match(/<meta[^>]+content="([^"]+)"[^>]+(?:property|name)="og:image"/i);
+    const ogImage = imageMatch ? imageMatch[1].trim() : '';
+
+    // Extract price using our robust non-zero selective scanner
+    const priceAmount = extractPriceFromHtml(html);
+
+    // Try finding main eBay/retailer listing image if ogImage is empty
+    let finalOgImage = ogImage;
+    if (!finalOgImage) {
+      const rawImgMatch = html.match(/<img[^>]+id="icImg"[^>]+src="([^"]+)"/i) ||
+                           html.match(/id="mainImgHldr"[\s\S]*?src="([^"]+)"/i) ||
+                           html.match(/class="ux-image-filmstrip-carousel"[\s\S]*?src="([^"]+)"/i);
+      if (rawImgMatch && rawImgMatch[1]) {
+        finalOgImage = rawImgMatch[1].trim();
+      }
+    }
+
+    // Strip scripts, styles, and format readable text for LLM context inclusion
+    let cleanText = html
+      .replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, '')
+      .replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const formattedContentText = `
+URL submitted: ${url}
+HTML Title: ${title}
+Meta Thumbnail: ${finalOgImage}
+Meta Description: ${description}
+Meta Price Amount: ${priceAmount}
+Dense Body Snippet: ${cleanText.substring(0, 15000)}
+    `.trim();
+
+    return {
+      contentText: formattedContentText,
+      title,
+      description,
+      ogImage: finalOgImage,
+      priceAmount
+    };
+  } catch (error: any) {
+    console.warn(`[Web Crawler] Scraper fetch warning for "${url}": ${error.message}`);
+    return {
+      contentText: `URL submitted: ${url}`,
+      title: '',
+      description: '',
+      ogImage: '',
+      priceAmount: ''
+    };
+  }
+};
+
+/**
+ * Super-powered unauthenticated offline fallback parser for eBay listings.
+ * Scours eBay oEmbed API for titles/images, and the cached search XML RSS feed for prices.
+ */
+async function fetchEbayItemOffline(itemId: string) {
+  let title = '';
+  let priceAmount = '';
+  let ogImage = '';
+  let description = '';
+  let rawXml = '';
+
+  // 0. Primary check: Attempt to crawl the direct listing page directly (very high fidelity)
+  try {
+    const directUrl = `https://www.ebay.com/itm/${itemId}`;
+    const directRes = await fetch(directUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      }
+    });
+    if (directRes.ok) {
+      const htmlText = await directRes.text();
+      // Extract title
+      const titleMatch = htmlText.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      if (titleMatch && titleMatch[1]) {
+        title = titleMatch[1].replace(/\s*\|\s*eBay/gi, '').replace(/\s+/g, ' ').trim();
+      }
+      
+      // Extract price using our versatile mult-currency scanner
+      priceAmount = extractPriceFromHtml(htmlText);
+      
+      // Extract ogImage
+      const imageMatch = htmlText.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']og:image["']/i) ||
+                         htmlText.match(/<meta[^>]+(?:property|name)=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+      if (imageMatch && imageMatch[1]) {
+        ogImage = imageMatch[1].trim();
+      }
+      
+      // Extract description
+      const descMatch = htmlText.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']description["']/i) ||
+                        htmlText.match(/<meta[^>]+(?:property|name)=["']description["'][^>]+content=["']([^"']+)["']/i);
+      if (descMatch && descMatch[1]) {
+        description = descMatch[1].trim();
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[eBay Offline Fallback] Direct page crawl failed or was blocked:`, err.message);
+  }
+
+  // 1. Try eBay oEmbed if we didn't get general details from direct page
+  if (!title || !ogImage) {
+    try {
+      const oEmbedUrl = `https://www.ebay.com/services/oembed?url=https%3A%2F%2Fwww.ebay.com%2Fitm%2F${itemId}&format=json`;
+      const oRes = await fetch(oEmbedUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      if (oRes.ok) {
+        const oData = await oRes.json() as any;
+        if (oData) {
+          title = title || oData.title || '';
+          ogImage = ogImage || oData.thumbnail_url || '';
+          description = description || `Active eBay listing for: ${title}. Sourced via unauthenticated oEmbed fallback.`;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[eBay Offline Fallback] oEmbed query failed:`, err.message);
+    }
+  }
+
+  // 2. Try eBay search index RSS feed if price/xml still needed
+  if (!priceAmount) {
+    try {
+      const rssUrl = `https://www.ebay.com/sch/i.html?_nkw=${itemId}&_rss=1`;
+      const rssRes = await fetch(rssUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+          'Accept': 'text/xml,application/xml,application/xhtml+xml,text/html;q=0.9',
+          'Accept-Language': 'en-US,en;q=0.5'
+        }
+      });
+
+      if (rssRes.ok) {
+        rawXml = await rssRes.text();
+      }
+    } catch (err: any) {
+      console.warn(`[eBay Offline Fallback] RSS lookup failed:`, err.message);
+    }
+
+    let itemMatch = rawXml.match(/<item>([\s\S]*?)<\/item>/i);
+
+    // If no items in the feed, try searching by title (which is highly specific and returns matches)
+    if (!itemMatch && title) {
+      try {
+        const searchTitleUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(title)}&_rss=1`;
+        console.log(`[eBay Offline Fallback] No items found for ID search. Retrying RSS search by exact oEmbed title: "${title}"`);
+        const rssRes = await fetch(searchTitleUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+            'Accept': 'text/xml,application/xml,application/xhtml+xml,text/html;q=0.9',
+            'Accept-Language': 'en-US,en;q=0.5'
+          }
+        });
+        if (rssRes.ok) {
+          rawXml = await rssRes.text();
+          itemMatch = rawXml.match(/<item>([\s\S]*?)<\/item>/i);
+        }
+      } catch (err: any) {
+        console.warn(`[eBay Offline Fallback] RSS Title search failed:`, err.message);
+      }
+    }
+
+    if (itemMatch && itemMatch[1]) {
+      const itemXml = itemMatch[1];
+      
+      if (!title) {
+        const tMatch = itemXml.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+        if (tMatch && tMatch[1]) {
+          title = tMatch[1].replace(/\s*\|\s*eBay/gi, '').replace(/\s+/g, ' ').trim();
+        }
+      }
+      
+      if (!ogImage) {
+        const imgMatch = itemXml.match(/<img[^>]+src="([^"]+)"/i) || itemXml.match(/<media:thumbnail[^>]+url="([^"]+)"/i);
+        if (imgMatch && imgMatch[1]) {
+          ogImage = imgMatch[1].trim();
+        }
+      }
+
+      // Search description for price patterns (e.g., <b>$1.99</b>, Price: $1.99, etc.) using our precise scanner
+      priceAmount = extractPriceFromHtml(itemXml);
+    }
+  }
+
+  // Clean HTML entities if present
+  if (title) {
+    title = title
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+
+  return {
+    title,
+    priceAmount,
+    ogImage,
+    description: description || (title ? `Active eBay listing for "${title}".` : ''),
+    rawXml
+  };
+}
+
+const fallbackConstructEbayAffiliateUrl = (itemId: string): string => {
+  const campid = process.env.EBAY_CAMPAIGN_ID || PLATFORM_DEFAULT_CAMPID || "5339014523";
+  const toolid = "10001";
+  const mkrid = "711-53200-19255-0";
+  const customid = "w1d1_hub_sync";
+  return `https://www.ebay.com/itm/${itemId}?mkrid=${mkrid}&siteid=0&campid=${campid}&toolid=${toolid}&customid=${customid}`;
+};
+
 export const generateProductsFromUrl = async (url: string, category?: ProjectCategory): Promise<Product[]> => {
   if (!isServer) {
     const res = await fetch('/api/ai/products/url', {
@@ -314,45 +710,339 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
     return res.json();
   }
 
-  console.log(`[Vision AI] Starting URL Analysis for: ${url} (Category: ${category})`);
+  // Auto-detect eBay listings and fetch directly from eBay Browse API
+  const ebayMatch = url.match(/\/itm\/(?:[^\/]+\/)?([0-9]+)/i);
+  let offlineData: any = null;
+
+  if (ebayMatch && ebayMatch[1]) {
+    const itemId = ebayMatch[1];
+    console.log(`[eBay Auto-Discovery] Detected eBay listing item URL. Extracting details via eBay Browse API for itemId: ${itemId}`);
+    if (cachedEbayApiDenied) {
+      console.log(`[eBay Auto-Discovery] Bypassing eBay Browse API due to cached Access Denied / Insufficient Permissions.`);
+    } else {
+      try {
+        const { getEbayItem, searchEbayItems, constructEbayAffiliateUrl } = await import("./ebayBrowseService.js");
+
+        let ebayData: any = null;
+        let usedSearchFallback = false;
+
+        // 1. Try direct Item Browse API
+        try {
+          ebayData = await getEbayItem(itemId);
+        } catch (directErr: any) {
+          console.log(`[eBay Auto-Discovery] Direct getEbayItem bypassed for ${itemId} (using Search and offline fallback routing).`);
+          if (directErr.message.includes('Access denied') || directErr.message.includes('1100') || directErr.message.includes('permission')) {
+            console.log(`[eBay Auto-Discovery] Insufficient permissions detected. Caching Browse API denial status.`);
+            cachedEbayApiDenied = true;
+          }
+          // 2. Fallback: search for the itemId to get listing summary
+          if (!cachedEbayApiDenied) {
+            try {
+              const searchData = await searchEbayItems(itemId, 1);
+              if (searchData && searchData.length > 0) {
+                ebayData = searchData[0];
+                usedSearchFallback = true;
+              }
+            } catch (searchErr: any) {
+              console.log(`[eBay Auto-Discovery] Search API fallback bypassed for ${itemId}.`);
+              if (searchErr.message.includes('Access denied') || searchErr.message.includes('1100') || searchErr.message.includes('permission')) {
+                cachedEbayApiDenied = true;
+              }
+            }
+          }
+        }
+
+        if (ebayData) {
+          let priceVal = 0;
+          let currencyVal = 'USD';
+          let imageUrlVal = `https://picsum.photos/seed/ebay_${itemId}/400/400`;
+          let titleVal = ebayData.title || 'eBay Sourced Product';
+          let descVal = ebayData.description || ebayData.shortDescription || `Special curated eBay item (${titleVal}) listed on eBay marketplace.`;
+
+          if (usedSearchFallback) {
+            // Structure returned by item_summary/search is slightly different
+            priceVal = parseFloat(ebayData.price?.value || "0");
+            currencyVal = ebayData.price?.currency || "USD";
+            imageUrlVal = ebayData.image?.imageUrl || imageUrlVal;
+            descVal = `Live eBay item listing for "${titleVal}" (ID: ${itemId}).`;
+          } else {
+            // Structure returned by item/itemId
+            priceVal = parseFloat(ebayData.price?.value || "0");
+            currencyVal = ebayData.price?.currency || "USD";
+            imageUrlVal = ebayData.image?.imageUrl || imageUrlVal;
+          }
+
+          const affiliateUrl = constructEbayAffiliateUrl ? constructEbayAffiliateUrl(itemId) : fallbackConstructEbayAffiliateUrl(itemId);
+          
+          const parsedEbayItem: Product = {
+            id: `ebay-${itemId}`,
+            name: titleVal,
+            price: { amount: priceVal, currency: currencyVal },
+            description: descVal,
+            retailer: 'eBay',
+            evaluation: `Directly synchronized with live eBay listing catalog.${usedSearchFallback ? ' (Search-matching verified)' : ''}`,
+            imageUrl: imageUrlVal,
+            purchaseUrl: affiliateUrl,
+            isPartnerProduct: true,
+            isCreatorDeclared: true,
+            sourceType: 'manual'
+          };
+          
+          console.log(`[eBay Auto-Discovery] Successfully imported eBay item: ${parsedEbayItem.name} at price: ${priceVal}`);
+          return [parsedEbayItem];
+        }
+      } catch (ebayErr: any) {
+        console.log(`[eBay Auto-Discovery] API query / token bypassed for itemId ${itemId}, routing to offline backup parser.`);
+        if (ebayErr.message.includes('Access denied') || ebayErr.message.includes('1100') || ebayErr.message.includes('permission')) {
+          cachedEbayApiDenied = true;
+        }
+      }
+    }
+
+    // 3. Robust super-powered unauthenticated offline fallback (RSS + oEmbed) if API or credentials failed
+    try {
+      console.log(`[eBay Auto-Discovery] Invoking offline RSS + oEmbed scraper fallback for itemId: ${itemId}`);
+      offlineData = await fetchEbayItemOffline(itemId);
+      if (offlineData && offlineData.title) {
+        const priceVal = parseFloat(offlineData.priceAmount || "0");
+        const affiliateUrl = fallbackConstructEbayAffiliateUrl(itemId);
+        
+        if (priceVal > 0) {
+          const parsedEbayItem: Product = {
+            id: `ebay-${itemId}`,
+            name: offlineData.title,
+            price: { amount: priceVal, currency: 'USD' },
+            description: offlineData.description || `Special curated eBay item (${offlineData.title}) listed on eBay marketplace.`,
+            retailer: 'eBay',
+            evaluation: `Offline Sourced: Seamless product matching via unauthenticated oEmbed & RSS index catalogs. No credentials required, affiliate link established.`,
+            imageUrl: offlineData.ogImage || `https://picsum.photos/seed/ebay_${itemId}/400/400`,
+            purchaseUrl: affiliateUrl,
+            isPartnerProduct: true,
+            isCreatorDeclared: true,
+            sourceType: 'manual'
+          };
+          
+          console.log(`[eBay Auto-Discovery] Successfully compiled eBay item from offline index backup: ${parsedEbayItem.name} at price: ${priceVal}`);
+          return [parsedEbayItem];
+        } else {
+          console.log(`[eBay Auto-Discovery] Sourced details for eBay item "${offlineData.title}" via fallback oEmbed but price was empty/zero. Dropping down to unblocked virtual crawl parsing via Gemini API...`);
+        }
+      }
+    } catch (offlineErr: any) {
+      console.log(`[eBay Auto-Discovery] Offline fallback routed for itemId ${itemId}.`);
+    }
+  }
+
+  console.log(`[Vision AI] Initiating scraping and RAG text extraction for: ${url}`);
+  
+  let crawledResult: CrawledPageData | null = null;
   try {
+    if (ebayMatch && offlineData) {
+      console.log(`[eBay Auto-Discovery] Feeding oEmbed metadata & raw RSS XML search feed down to Gemini's reasoning engine to bypass anti-scraping blocks.`);
+      crawledResult = {
+        contentText: `
+URL submitted: ${url}
+eBay Item ID: ${ebayMatch[1]}
+Listing Title: ${offlineData.title}
+Meta Thumbnail: ${offlineData.ogImage}
+Meta Description: ${offlineData.description}
+Raw XML RSS Feed Snippet:
+${offlineData.rawXml || ''}
+        `.trim(),
+        title: offlineData.title,
+        description: offlineData.description,
+        ogImage: offlineData.ogImage,
+        priceAmount: offlineData.priceAmount || ''
+      };
+    } else {
+      crawledResult = await fetchAndExtractPageContent(url);
+    }
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     
     const response = await withTimeout(ai.models.generateContent({
       model: 'gemini-3.5-flash',
-      contents: `You are a specialist in ${category || 'General'} projects only.
+      contents: `You are an expert product details extractor and web semantic parsing model.
+The user wants to import a product from this web page link:
+"${url}"
 
-STRICT CATEGORY RULES:
-- ONLY return tools, materials, and products that belong to the declared category: "${category || 'General'}".
-- If the video/page content does NOT match the declared category, or contains no relevant physical tools/materials, return an empty array [] immediately.
-- Do NOT guess or pull tools from other trades (e.g. no drywall tools for plumbing, no woodworking for electrical, etc.).
+Here is the extracted text and metadata we crawled:
+### CRAWLED WEBPAGE CONTENT ###
+${crawledResult.contentText}
+### END CRAWLED WEBPAGE CONTENT ###
 
-Video/Project: "${url}"
-Category: "${category || 'General'}"
+Task:
+Your task is to analyze the crawled content and reconstruct the single product details described on that webpage.
+Return exactly 1 item in the array.
+Extract:
+1. name: The precise, human-friendly product name (e.g., "Rogue RD80PK Dreadnought Acoustic Guitar Pack"). Clean up any trailing query strings or SEO junk, but keep the exact brand and model.
+2. price: The exact numerical price (e.g., 120.00 or "120.00"). Prefer the Meta Price Amount if present or extract it from the page title/snippet.
+3. retailer: The name of the store (e.g., "Guitar Center", "Amazon", "Shopify", or the domain of the site).
+4. description: A clear 1-sentence showcase description.
+5. evaluation: A list of 3-4 bullet specifications or reasons to buy.
+6. technicalSpecs: Key technical attributes of the product.
 
-Analyze this tutorial/page: ${url}. 
-The user has categorized this as: "${category || 'General'}".
-Identify ALL primary products, gear items, or materials discussed. 
-PRIORITIZE RECALL: It is better to have a generic or approximate match than to miss an item mentioned in the content. Surfaces 5-8 recommendations.
-Return as JSON with technical specs.`,
+Ensure to output a valid JSON array matching the productSchema. No markdown outside the JSON block.`,
       config: { 
-        tools: [{ urlContext: {} }],
         responseMimeType: "application/json",
         responseSchema: productSchema
       }
-    }), 35000); 
+    }), 30000); 
     
     const raw = safeParse(response.text, []);
-    if (raw.length > 0) {
-        console.log(`[Vision AI] URL Analysis successful via urlContext`);
-        return Promise.all(raw.map((p: any) => routeProductDiscovery(p)));
+    if (raw && raw.length > 0) {
+        // Force the crawled URL and designated flags to preserve custom metadata from being overwritten by general listings
+        const annotated = raw.map((item: any) => {
+            const domainMatch = url.match(/^(?:https?:\/\/)?(?:www\.)?([^\/]+)/i);
+            const domain = domainMatch ? domainMatch[1] : 'External Retailer';
+            const cleanDomain = domain.replace(/\.[a-z]{2,6}$/i, '').split('.').pop() || 'Retailer';
+            const cleanRetailer = cleanDomain.charAt(0).toUpperCase() + cleanDomain.slice(1);
+
+            return {
+                ...item,
+                purchaseUrl: url,
+                retailer: item.retailer || cleanRetailer,
+                isUrlImport: true,
+                sourceType: 'manual',
+                isCreatorDeclared: true
+            };
+        });
+        
+        console.log(`[Vision AI] Successfully crawled and modeled product: ${annotated[0].name}`);
+        return Promise.all(annotated.map((p: any) => routeProductDiscovery(p)));
     }
 
-    console.log(`[Vision AI] urlContext empty, falling back to text analysis...`);
-    return generateProductsFromText(url, category);
-  } catch (e) {
-    console.warn("[Vision AI] URL Analysis Error on client, trying server proxy backup...");
-    return generateProductsFromText(url, category);
+    throw new Error("Zero structured products returned from crawler response parsing.");
+  } catch (e: any) {
+    console.log("[Vision AI] Crawler fallback mode active: semantic path reconstruction in progress.");
+    
+    // Fallback URL Path Parsing Algorithm inside express server
+    try {
+      // If we don't have crawler results yet, let's try crawling quickly
+      if (!crawledResult) {
+        crawledResult = await fetchAndExtractPageContent(url).catch(() => null);
+      }
+
+      // Try unauthenticated eBay oEmbed API as a super-powered fallback for titles and images if crawl gets blocked
+      if (url.includes('ebay.com')) {
+        try {
+          const oEmbedUrl = `https://www.ebay.com/services/oembed?url=${encodeURIComponent(url)}&format=json`;
+          const oRes = await fetch(oEmbedUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+          });
+          if (oRes.ok) {
+            const oData = await oRes.json() as any;
+            if (oData && oData.title) {
+              if (!crawledResult) {
+                crawledResult = {
+                  contentText: `oEmbed fetched: ${oData.title}`,
+                  title: oData.title,
+                  description: oData.title,
+                  ogImage: oData.thumbnail_url || '',
+                  priceAmount: ''
+                };
+              } else {
+                if (!crawledResult.title) crawledResult.title = oData.title;
+                if (!crawledResult.ogImage) crawledResult.ogImage = oData.thumbnail_url || '';
+              }
+            }
+          }
+        } catch (oErr) {
+          console.warn("[eBay oEmbed Fallback] Failed:", oErr);
+        }
+      }
+
+      const domainMatch = url.match(/^(?:https?:\/\/)?(?:www\.)?([^\/]+)/i);
+      const domain = domainMatch ? domainMatch[1] : 'External Retailer';
+      const cleanDomain = domain.replace(/\.[a-z]{2,6}$/i, '').split('.').pop() || 'Retailer';
+      const cleanRetailer = cleanDomain.charAt(0).toUpperCase() + cleanDomain.slice(1);
+
+      // Use page title if present, otherwise parse the path
+      let name = '';
+      if (crawledResult && crawledResult.title) {
+        name = crawledResult.title;
+        // Clean up titles (e.g. Rogue RD80PK Dreadnought Acoustic Guitar Pack | Guitar Center -> Rogue RD80PK Dreadnought Acoustic Guitar Pack)
+        name = name.split(/\s*\|\s*|\s*-\s*|\s*—\s*/)[0].trim();
+      }
+
+      const isNumeric = (str: string) => /^\d+$/.test(str.replace(/\s/g, ''));
+      if (!name || name.length < 5 || isNumeric(name) || name === 'URL submitted' || name.toLowerCase().includes('robot') || name.toLowerCase().includes('captcha')) {
+        // Try extracting search keywords or item description from the URL query
+        try {
+          const parsedUrl = new URL(url);
+          const skw = parsedUrl.searchParams.get('_skw') || parsedUrl.searchParams.get('_nkw') || parsedUrl.searchParams.get('q') || parsedUrl.searchParams.get('query');
+          if (skw) {
+            const rawSkw = decodeURIComponent(skw).replace(/[+-]/g, ' ').trim();
+            if (rawSkw && rawSkw.length > 2) {
+              name = rawSkw.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+            }
+          }
+        } catch (e) {
+          console.error("URL parsing error during fallback:", e);
+        }
+      }
+
+      if (!name || name.length < 3 || isNumeric(name)) {
+        const urlParts = url.split('/');
+        let lastPart = urlParts[urlParts.length - 1] || '';
+        if (lastPart.includes('?') || lastPart.includes('&') || lastPart.includes('#')) {
+          lastPart = lastPart.split(/[?&#]/)[0];
+        }
+        
+        name = lastPart
+          .replace(/[-_]/g, ' ')
+          .replace(/\d+gc|gc|\d+dp|dp/gi, '') // Strip common retailer ID tags
+          .replace(/\.[a-z]{2,4}$/i, '')     // Clean file extension
+          .trim();
+        
+        if (!name || name.length < 3 || isNumeric(name)) {
+          let prevPart = urlParts[urlParts.length - 2] || '';
+          name = prevPart.replace(/[-_]/g, ' ').trim();
+        }
+
+        if (!name || name.length < 3 || isNumeric(name)) {
+          // If it's still numeric (like eBay itemId), make it descriptive
+          if (isNumeric(lastPart)) {
+            name = `eBay Item ${lastPart}`;
+          } else {
+            name = 'Custom Sourced Product';
+          }
+        }
+
+        // Format words elegantly
+        name = name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      }
+
+      const rawPrice = crawledResult?.priceAmount || '';
+      const parsedPriceNum = parseFloat(rawPrice);
+      const finalPrice = parsedPriceNum > 0 ? { amount: parsedPriceNum, currency: 'USD' } : { amount: 0, currency: 'USD' };
+
+      const finalDescription = crawledResult?.description 
+        ? crawledResult.description 
+        : `Custom curated product from ${cleanRetailer}. Open checkout link to view.`;
+
+      const finalImage = (crawledResult?.ogImage && crawledResult.ogImage.startsWith('http'))
+        ? crawledResult.ogImage
+        : `https://picsum.photos/seed/${encodeURIComponent(name)}/400/400`;
+
+      const fallbackItem: Product = {
+        id: `url_fallback_${Date.now()}`,
+        name: name,
+        price: finalPrice,
+        description: finalDescription,
+        retailer: cleanRetailer,
+        evaluation: `Spliced directly from active product link.`,
+        imageUrl: finalImage,
+        purchaseUrl: url,
+        isPartnerProduct: false,
+        isCreatorDeclared: true,
+        sourceType: 'manual'
+      };
+      
+      return [fallbackItem];
+    } catch (fallbackErr: any) {
+      console.error("[Vision AI] Hard failure on fallback parser:", fallbackErr);
+      return [];
+    }
   }
 };
 

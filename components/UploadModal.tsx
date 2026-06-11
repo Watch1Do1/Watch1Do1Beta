@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { XCircleIcon, PlusIcon, SparkleIcon, UploadIcon, RefreshCwIcon, CheckCircleIcon, ShieldIcon, SearchIcon } from './IconComponents';
 import { ProjectCategory, User, Product } from '../types';
+import AddProductModal from './AddProductModal';
 
 interface UploadModalProps {
   onClose: () => void;
@@ -44,6 +45,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading,
   // Manual Product Injection State (Future Marketplace Integration)
   const [manualSearch, setManualSearch] = useState('');
   const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -380,59 +382,61 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading,
                       </div>
                   </div>
 
-                  {/* Manual Product Injection Section (Future Marketplace Integration) */}
-                  {isVerified && (
-                    <div className="space-y-4 pt-4 border-t border-slate-700/30 animate-fade-in">
-                        <div className="flex items-center justify-between ml-2">
-                            <div className="flex items-center gap-2">
-                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Marketplace Integration</label>
-                                <div className="px-1.5 py-0.5 bg-[#7D8FED]/10 border border-[#7D8FED]/30 rounded text-[7px] font-black text-[#7D8FED] uppercase tracking-widest">Affiliate Mode</div>
-                            </div>
-                            <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Inject sourcing links</span>
-                        </div>
-                        
-                        <div className="flex gap-2">
-                            <div className="relative flex-1">
-                                <input 
-                                    type="text" 
-                                    value={manualSearch} 
-                                    onChange={(e) => setManualSearch(e.target.value)} 
-                                    placeholder="Search marketplace (Coming Soon)..."
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-6 py-4 text-white text-sm focus:border-[#7D8FED] outline-none transition-all shadow-inner pr-12 opacity-50 cursor-not-allowed" 
-                                    disabled
-                                />
-                                <button 
-                                    type="button"
-                                    disabled
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-500 opacity-30"
-                                >
-                                    <SearchIcon className="w-5 h-5" />
-                                </button>
-                            </div>
-                        </div>
+                  {/* Manual Product Injection Section */}
+                  <div className="space-y-4 pt-6 border-t border-slate-700/30">
+                      <div className="flex items-center justify-between ml-2">
+                          <div className="flex items-center gap-2 animate-fade-in">
+                              <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Build Kit Splicer</label>
+                              <div className="px-1.5 py-0.5 bg-[#7D8FED]/10 border border-[#7D8FED]/30 rounded text-[7px] font-black text-[#7D8FED] uppercase tracking-widest">Active Curation</div>
+                          </div>
+                          <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Pre-Link Sourcing Tools</span>
+                      </div>
+                      
+                      <div className="flex gap-4 items-center">
+                          <button
+                              type="button"
+                              onClick={() => setIsAddProductModalOpen(true)}
+                              className="px-6 py-4.5 bg-slate-900 border border-slate-700/80 hover:border-[#7D8FED]/50 rounded-2xl text-[10px] text-[#7D8FED] font-black uppercase tracking-widest flex items-center gap-2.5 transition-all shadow-inner hover:bg-slate-900/80"
+                          >
+                              <PlusIcon className="w-3.5 h-3.5" />
+                              Custom Product / URL Import
+                          </button>
+                          <p className="text-[10px] text-slate-500 max-w-sm leading-relaxed">
+                              Inject custom items, materials, or paste Amazon/Shopify links directly. They will bypass model defaults.
+                          </p>
+                      </div>
 
-                        {/* Selected Manual Products */}
-                        {selectedProducts.length > 0 && (
-                            <div className="space-y-2">
-                                <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest ml-2">Selected for Build Kit ({selectedProducts.length})</p>
-                                <div className="flex wrap gap-2">
-                                    {selectedProducts.map(prod => (
-                                        <div key={prod.id} className="flex items-center gap-2 bg-[#7D8FED]/10 border border-[#7D8FED]/30 rounded-full pl-2 pr-1 py-1 animate-scale-in">
-                                            <span className="text-[10px] font-bold text-white px-1 truncate max-w-[150px]">{prod.name}</span>
-                                            <button 
-                                                type="button"
-                                                onClick={() => removeManualProduct(prod.id)}
-                                                className="p-1 text-slate-400 hover:text-rose-500 transition-all"
-                                            >
-                                                <XCircleIcon className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                  )}
+                      {/* Selected Manual Products */}
+                      {selectedProducts.length > 0 && (
+                          <div className="space-y-3 bg-slate-900/30 p-5 rounded-3xl border border-slate-700/40 animate-fade-in">
+                              <p className="text-[8.5px] font-black text-slate-500 uppercase tracking-widest ml-1">Official Curated Build Kit ({selectedProducts.length} Items)</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {selectedProducts.map(prod => (
+                                      <div key={prod.id} className="flex items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-2xl border border-slate-700/60 hover:border-slate-600/80 transition-all group/item">
+                                          <div className="flex items-center gap-2.5 min-w-0">
+                                              <img src={prod.imageUrl} className="w-9 h-9 object-cover rounded-lg border border-slate-800 flex-shrink-0" alt="" referrerPolicy="no-referrer" />
+                                              <div className="min-w-0">
+                                                  <p className="text-xs font-black text-white truncate max-w-[150px] uppercase">{prod.name}</p>
+                                                  <div className="flex items-center gap-2 mt-0.5">
+                                                      <span className="text-[9px] font-bold text-emerald-500">${prod.price.amount.toFixed(2)}</span>
+                                                      <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest truncate max-w-[80px]">{prod.retailer}</span>
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <button 
+                                              type="button"
+                                              onClick={() => removeManualProduct(prod.id)}
+                                              className="p-2 border border-transparent hover:border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-all flex items-center justify-center"
+                                              title="Remove Sourcing Selection"
+                                          >
+                                              <XCircleIcon className="w-4 h-4" />
+                                          </button>
+                                      </div>
+                                  ))}
+                              </div>
+                          </div>
+                      )}
+                  </div>
 
                   {/* Legal Affirmation */}
                   {!isVerified && (
@@ -487,6 +491,13 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, isLoading,
           )}
         </div>
       </div>
+      {isAddProductModalOpen && (
+        <AddProductModal 
+          onClose={() => setIsAddProductModalOpen(false)}
+          onAddProduct={(p) => setSelectedProducts(prev => [p, ...prev])}
+          category={category}
+        />
+      )}
     </div>
   );
 };
