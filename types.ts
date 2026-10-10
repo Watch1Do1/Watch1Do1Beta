@@ -209,8 +209,11 @@ export interface User {
   lastSyncAt?: string;
   catalogCount?: number;
   password?: string; // Hashed password
+  passwordHash?: string;
   resetToken?: string;
   resetTokenExpiry?: number;
+  resetTokenHash?: string; // SHA-256 hash of the reset token (raw token is never stored)
+  tokenVersion?: number; // Incremented to invalidate all sessions
 }
 
 export interface CartItem extends Product {
