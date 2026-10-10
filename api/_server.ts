@@ -22,7 +22,7 @@ import {
 import { 
   searchEbayItems, 
   getEbayItem, 
-  constructEbayAffiliateUrl 
+  normalizeEbayItem 
 } from '../services/ebayBrowseService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1129,26 +1129,8 @@ app.get('/api/ebay/search', async (req, res) => {
     const { q, limit } = req.query;
     const items = await searchEbayItems(q as string, limit ? Number(limit) : 10);
     
-    // Normalize to internal Product type
-    const normalized = items.map((item: any) => ({
-      id: `ebay-${item.itemId}`,
-      name: item.title,
-      price: {
-        amount: parseFloat(item.price.value),
-        currency: item.price.currency
-      },
-      imageUrl: item.image?.imageUrl || 'https://picsum.photos/seed/ebay/200/200',
-      purchaseUrl: constructEbayAffiliateUrl(item.itemId),
-      retailer: 'eBay',
-      isAvailable: true,
-      stockStatus: 'in-stock',
-      condition: item.condition,
-      seller: item.seller?.username,
-      description: item.shortDescription || item.title,
-      evaluation: `Verified eBay listing: ${item.condition || 'New'}. Seller: ${item.seller?.username || 'Unknown'}.`,
-      isPartnerProduct: false,
-      sourceType: 'verified'
-    }));
+    // Normalize to internal Product type (shared with geminiService's server-side eBay path)
+    const normalized = items.map(normalizeEbayItem);
     
     res.json(normalized);
   } catch (e: any) {

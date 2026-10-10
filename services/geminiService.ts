@@ -147,19 +147,31 @@ const routeProductDiscovery = async (p: any): Promise<Product> => {
         return result;
     }
 
-    // Use eBay Browse API for direct merchant matches
+    // Use eBay Browse API for direct merchant matches (skipped once eBay has denied this keyset)
     try {
-        let ebayResults = [];
+        let ebayResults: any[] = [];
         if (isServer) {
-            const { searchEbayItems } = await import("./ebayBrowseService.js");
-            ebayResults = await searchEbayItems(p.name, 1);
+            if (!cachedEbayApiDenied) {
+                const { searchEbayItems, normalizeEbayItem, isEbayAccessDenied } = await import("./ebayBrowseService.js");
+                try {
+                    const rawItems = await searchEbayItems(p.name, 1);
+                    ebayResults = rawItems.map(normalizeEbayItem);
+                } catch (ebayErr) {
+                    if (isEbayAccessDenied(ebayErr)) {
+                        console.warn("[eBay Discovery] Browse API access denied or not configured. Skipping eBay lookups on this instance.");
+                        cachedEbayApiDenied = true;
+                    }
+                    throw ebayErr;
+                }
+            }
         } else {
+            // /api/ebay/search already returns normalized Products
             const res = await fetch(`/api/ebay/search?q=${encodeURIComponent(p.name)}&limit=1`);
             if (res.ok) ebayResults = await res.json();
         }
         
         if (ebayResults && ebayResults.length > 0) {
-            const ebayItem = ebayResults[0];
+            const ebayItem: Product = ebayResults[0];
             const result: Product = {
                 ...p,
                 id: ebayItem.id,
@@ -167,7 +179,7 @@ const routeProductDiscovery = async (p: any): Promise<Product> => {
                 imageUrl: ebayItem.imageUrl,
                 purchaseUrl: ebayItem.purchaseUrl,
                 retailer: 'eBay',
-                isAvailable: true,
+                available: true,
                 stockStatus: 'in-stock',
                 isPartnerProduct: false,
                 sourceType: 'verified'
@@ -732,8 +744,8 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
     if (cachedEbayApiDenied) {
       console.log(`[eBay Auto-Discovery] Bypassing eBay Browse API due to cached Access Denied / Insufficient Permissions.`);
     } else {
+      const { getEbayItem, searchEbayItems, constructEbayAffiliateUrl, isEbayAccessDenied } = await import("./ebayBrowseService.js");
       try {
-        const { getEbayItem, searchEbayItems, constructEbayAffiliateUrl } = await import("./ebayBrowseService.js");
 
         let ebayData: any = null;
         let usedSearchFallback = false;
@@ -743,7 +755,7 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
           ebayData = await getEbayItem(itemId);
         } catch (directErr: any) {
           console.log(`[eBay Auto-Discovery] Direct getEbayItem bypassed for ${itemId} (using Search and offline fallback routing).`);
-          if (directErr.message.includes('Access denied') || directErr.message.includes('1100') || directErr.message.includes('permission')) {
+          if (isEbayAccessDenied(directErr)) {
             console.log(`[eBay Auto-Discovery] Insufficient permissions detected. Caching Browse API denial status.`);
             cachedEbayApiDenied = true;
           }
@@ -757,7 +769,7 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
               }
             } catch (searchErr: any) {
               console.log(`[eBay Auto-Discovery] Search API fallback bypassed for ${itemId}.`);
-              if (searchErr.message.includes('Access denied') || searchErr.message.includes('1100') || searchErr.message.includes('permission')) {
+              if (isEbayAccessDenied(searchErr)) {
                 cachedEbayApiDenied = true;
               }
             }
@@ -805,7 +817,7 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
         }
       } catch (ebayErr: any) {
         console.log(`[eBay Auto-Discovery] API query / token bypassed for itemId ${itemId}, routing to offline backup parser.`);
-        if (ebayErr.message.includes('Access denied') || ebayErr.message.includes('1100') || ebayErr.message.includes('permission')) {
+        if (isEbayAccessDenied(ebayErr)) {
           cachedEbayApiDenied = true;
         }
       }
