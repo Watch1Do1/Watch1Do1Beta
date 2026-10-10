@@ -154,9 +154,13 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.error("[App] Logout Error:", e);
+    }
     setCurrentUser(null);
-    localStorage.removeItem('w1d1_last_user');
     handleNavigateHome();
   };
 
@@ -233,22 +237,19 @@ const App: React.FC = () => {
             setVideos(cloudVideos || []); 
             
             // Restore session
-            const lastUserEmail = localStorage.getItem('w1d1_last_user');
-            const searchParams = new URLSearchParams(window.location.search);
-            const status = searchParams.get('status');
-
-            if (lastUserEmail) {
-                const user = await dbService.getUser(lastUserEmail);
-                if (user) {
-                    setCurrentUser(user);
-                    // If arrived from successful purchase, trigger a little celebration if they are now pro
-                    if (status === 'success' && user.subscriptionStatus !== 'Free') {
-                        // The server already awarded XP, but we can show a notification
-                        setXpNotification({ amount: 0, label: `${user.subscriptionStatus} Level Synchronized!` });
-                        setTimeout(() => setXpNotification(null), 5000);
-                        // Clean up URL
-                        window.history.replaceState({}, document.title, "/");
-                    }
+            const r = await fetch('/api/auth/me');
+            if (r.ok) {
+                const { user } = await r.json();
+                setCurrentUser(user);
+                const searchParams = new URLSearchParams(window.location.search);
+                const status = searchParams.get('status');
+                // If arrived from successful purchase, trigger a little celebration if they are now pro
+                if (status === 'success' && user.subscriptionStatus !== 'Free') {
+                    // The server already awarded XP, but we can show a notification
+                    setXpNotification({ amount: 0, label: `${user.subscriptionStatus} Level Synchronized!` });
+                    setTimeout(() => setXpNotification(null), 5000);
+                    // Clean up URL
+                    window.history.replaceState({}, document.title, "/");
                 }
             }
         } catch (e) {
@@ -407,7 +408,6 @@ const App: React.FC = () => {
         
         if (response.ok) {
             setCurrentUser(data.user);
-            localStorage.setItem('w1d1_last_user', normalizedEmail);
             setAuthModalMode(null);
             
             if (pendingAnalysis) {

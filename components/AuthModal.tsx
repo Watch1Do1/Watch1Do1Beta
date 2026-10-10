@@ -20,7 +20,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ mode, onClose, onSwitchMode, onSu
   const [error, setError] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
   const [isEmailSent, setIsEmailSent] = useState(false);
-  const [devResetLink, setDevResetLink] = useState('');
+  const [serverMessage, setServerMessage] = useState('');
 
   const isLogin = mode === 'login';
   const isForgot = mode === 'forgot-password';
@@ -30,7 +30,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ mode, onClose, onSwitchMode, onSu
   useEffect(() => {
     setIsEmailSent(false);
     setError('');
-    setDevResetLink('');
+    setServerMessage('');
   }, [mode]);
 
   // Handle Escape key
@@ -66,9 +66,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ mode, onClose, onSwitchMode, onSu
             });
             const data = await response.json();
             if (response.ok) {
-                if (data.devLink) {
-                    setDevResetLink(data.devLink);
-                }
+                setServerMessage(data.message || 'If that email has an account, a reset link has been sent.');
                 setIsEmailSent(true);
             } else {
                 setError(data.error || 'Failed to request reset.');
@@ -126,20 +124,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ mode, onClose, onSwitchMode, onSu
                     <SendIcon className="w-12 h-12 text-emerald-500" />
                 </div>
                 <h2 className="text-3xl font-black text-white mb-2 tracking-tighter">Transmission Sent</h2>
-                <p className="text-slate-400 font-medium">Reset instructions are en route to {email}.</p>
-                {devResetLink && (
-                  <div className="mt-6 p-5 bg-slate-900 rounded-2xl border border-[#7D8FED]/25 text-left animate-fade-in">
-                    <p className="text-[10px] font-black uppercase text-[#7D8FED] tracking-wider mb-2">Development Bypass Protocol</p>
-                    <p className="text-[11px] text-slate-400 mb-4 leading-relaxed">No Resend API Key is configured or email is sent locally. Click the button below to bypass wait and execute identity recovery directly:</p>
-                    <a 
-                      href={devResetLink} 
-                      onClick={() => onClose()}
-                      className="inline-block w-full text-center bg-[#7D8FED] hover:bg-[#6b7ae6] text-white text-[10px] font-black uppercase py-4 px-4 rounded-xl transition-all tracking-[0.15em]"
-                    >
-                      Bypass & Reset Key
-                    </a>
-                  </div>
-                )}
+                <p className="text-slate-400 font-medium leading-relaxed">{serverMessage || `Reset instructions are en route to ${email}.`}</p>
                 <button 
                   onClick={() => onSwitchMode('login')}
                   className="mt-8 text-xs font-black uppercase text-[#7D8FED] hover:text-white transition-colors tracking-widest"

@@ -88,9 +88,8 @@ export const dbService = {
   },
 
   async getAllUsers(): Promise<User[]> {
-      const data = await apiFetch<User[]>('/api/users');
-      if (data) return data;
-      return getLocal<User>('users');
+      const data = await apiFetch<User[]>('/api/admin/users');
+      return data || [];
   },
 
   async incrementVideoStat(videoId: number, stat: 'views' | 'clicks' | 'addToKitCount' | 'ratingCount' | 'activeBuilders'): Promise<void> {
@@ -175,13 +174,10 @@ export const dbService = {
 
   async getUser(email: string): Promise<User | null> {
     const data = await apiFetch<User>(`/api/users/${encodeURIComponent(email)}`);
-    if (data) return data;
-
-    const users = getLocal<User>('users');
-    return users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
+    return data || null;
   },
 
-  async upsertUser(user: User): Promise<boolean> {
+  async upsertUser(user: Partial<User>): Promise<User | null> {
     const response = await fetch('/api/users/upsert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -194,18 +190,24 @@ export const dbService = {
         throw new Error(errMsg);
     }
 
-    const res = await response.json().catch(() => (null));
+    const res = await response.json().catch(() => null);
+    return res?.user || null;
+  },
 
-    const users = getLocal<User>('users');
-    const existingIdx = users.findIndex(u => u.email.toLowerCase() === user.email.toLowerCase());
-    if (existingIdx > -1) {
-        users[existingIdx] = user;
-    } else {
-        users.push(user);
+  async adminUpdateUser(email: string, updates: Partial<User>): Promise<boolean> {
+    const response = await fetch('/api/admin/users/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, updates }),
+    });
+
+    if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        const errMsg = errData.error || "Failed to update user.";
+        throw new Error(errMsg);
     }
-    setLocal('users', users);
 
-    return !!res;
+    return true;
   },
 
   async submitReport(report: any): Promise<boolean> {
@@ -218,19 +220,21 @@ export const dbService = {
   },
 
   async getReports(): Promise<any[]> {
-    const data = await apiFetch<any[]>('/api/reports');
+    const data = await apiFetch<any[]>('/api/admin/reports');
     return data || [];
   },
 
   async resolveReport(reportId: string): Promise<boolean> {
-    const res = await apiFetch(`/api/reports/${reportId}/resolve`, {
-        method: 'POST'
+    const res = await apiFetch(`/api/admin/reports/${reportId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'resolved' })
     });
     return !!res;
   },
 
   async getAuditTrail(): Promise<any[]> {
-    const data = await apiFetch<any[]>('/api/admin/audit');
+    const data = await apiFetch<any[]>('/api/admin/audit-logs');
     return data || [];
   },
 

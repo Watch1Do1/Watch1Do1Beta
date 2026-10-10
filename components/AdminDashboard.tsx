@@ -225,16 +225,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleUpdateUser = async (email: string, updates: Partial<User>) => {
     try {
-        const existingUser = users.find(u => u.email === email);
-        if (existingUser) {
-            const updated = { ...existingUser, ...updates };
-            const success = await dbService.upsertUser(updated);
-            if (success) {
-                setUsers(prev => prev.map(u => u.email === email ? updated : u));
-            }
-        }
-    } catch (e) { 
-        alert("Failed to update user."); 
+        await dbService.adminUpdateUser(email, updates);
+        setUsers(prev => prev.map(u => u.email === email ? { ...u, ...updates } : u));
+    } catch (e: any) { 
+        alert(e.message || "Failed to update user."); 
     }
   };
 
