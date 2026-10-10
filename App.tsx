@@ -161,6 +161,8 @@ const App: React.FC = () => {
       console.error("[App] Logout Error:", e);
     }
     setCurrentUser(null);
+    // The video list depends on who is signed in (own unpublished hubs, creator ids)
+    setVideos(await dbService.getAllVideos() || []);
     handleNavigateHome();
   };
 
@@ -267,7 +269,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleVideoSelect = async (video: Video) => {
-      const creator = await dbService.getUser(video.creatorId);
+      const creator = await dbService.getVideoCreator(video.id);
       const videoWithTip = { ...video, creatorTipQrUrl: creator?.tipQrUrl, creatorVenmoHandle: creator?.venmoHandle };
       setSelectedVideo(videoWithTip); setView('videoPlayer');
       await dbService.incrementVideoStat(video.id, 'views');
@@ -362,9 +364,9 @@ const App: React.FC = () => {
         setAnalyzeModalOpen(false); 
         setView('videoPlayer'); 
         addXP(50, "Vision Usage");
-    } catch (e) { 
+    } catch (e: any) { 
         console.error("Analysis failed:", e);
-        alert("Analysis timed out or failed. Please try again or use a different URL."); 
+        alert(e?.name === 'ApiError' ? e.message : "Analysis timed out or failed. Please try again or use a different URL."); 
     } finally { 
         setIsLoading(false); 
         stopRotatingLoadingMessages(); 
@@ -389,7 +391,7 @@ const App: React.FC = () => {
         setVideos(prev => [newVideo, ...prev]); 
         await dbService.insertVideo(newVideo);
         setIsLoading(false); setUploadModalOpen(false); setSelectedVideo(newVideo); setView('videoPlayer');
-    } catch (error: any) { alert("Logic extraction failed."); } finally { setIsLoading(false); stopRotatingLoadingMessages(); }
+    } catch (error: any) { alert(error?.name === 'ApiError' ? error.message : "Logic extraction failed."); } finally { setIsLoading(false); stopRotatingLoadingMessages(); }
   };
 
   const handleAuthSubmit = async (email: string, password?: string, isOver18: boolean = false) => {
@@ -409,6 +411,8 @@ const App: React.FC = () => {
         if (response.ok) {
             setCurrentUser(data.user);
             setAuthModalMode(null);
+            // The video list depends on who is signed in (own unpublished hubs, creator ids)
+            setVideos(await dbService.getAllVideos() || []);
             
             if (pendingAnalysis) {
                 setAnalyzeModalInitialTab(pendingAnalysis.type);
@@ -821,7 +825,7 @@ const App: React.FC = () => {
         {isShareModalOpen && shareData && <ShareModal video={shareData.video} isCreatorView={shareData.isCreator} onClose={() => setShareModalOpen(false)} />}
         
         {sourcingKit.length > 0 && <SourcingRedirectModal items={sourcingKit} onClose={() => setSourcingKit([])} />}
-        {isEmailModalOpen && <EmailKitModal items={planningKit} projectTitle={selectedVideo?.title || "Watch1Do1 Project"} onClose={() => setIsEmailModalOpen(false)} onSend={async (email) => { await emailService.sendEmailKit(email, selectedVideo?.title || "Kit", planningKit); }} />}
+        {isEmailModalOpen && <EmailKitModal items={planningKit} currentUserEmail={currentUser?.email} projectTitle={selectedVideo?.title || "Watch1Do1 Project"} onClose={() => setIsEmailModalOpen(false)} onSend={async (email) => { await emailService.sendEmailKit(email, selectedVideo?.title || "Kit", planningKit); }} />}
         
         {isBetaModalOpen && (
           <BetaNotificationModal 

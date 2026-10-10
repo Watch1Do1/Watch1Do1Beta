@@ -23,3 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Stripe CLI binary (install via Homebrew instead of committing it)
+stripe
+
+# Local env files (keep the placeholder template)
+.env.*
+!.env.example

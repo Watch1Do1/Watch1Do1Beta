@@ -40,6 +40,7 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
   const isCreator = currentUser?.email === video.creatorId;
   const isPartnerOwner = currentUser?.isVerifiedPartner && (isCreator || video.products.some(p => p.merchantId === currentUser.partnerId));
   const canManage = isCreator || isPartnerOwner || currentUser?.isAdmin;
+  const isSignedIn = currentUser !== null;
   
   const isAiVideo = video.creatorId === 'ai@watch1do1.com';
   const isCurating = video.status === 'curating';
@@ -80,10 +81,11 @@ const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({
     if (isCreator && isCurating) {
         setIsEditing(true);
     }
-    if (isPublished && !isCreator && video.products.length > 0) {
+    // AI price checks require a session (/api/ai/* is sign-in only)
+    if (isPublished && !isCreator && isSignedIn && video.products.length > 0) {
         runAvailabilitySweep(video.products.slice(0, 2));
     }
-  }, [video, isCreator, isCurating, isPublished]);
+  }, [video, isCreator, isCurating, isPublished, isSignedIn]);
 
   const runAvailabilitySweep = async (items: Product[]) => {
     for (const item of items) {

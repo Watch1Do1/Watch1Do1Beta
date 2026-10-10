@@ -8,10 +8,11 @@ interface EmailKitModalProps {
   projectTitle: string;
   onClose: () => void;
   onSend: (email: string) => Promise<void>;
+  currentUserEmail?: string;
 }
 
-const EmailKitModal: React.FC<EmailKitModalProps> = ({ items, projectTitle, onClose, onSend }) => {
-  const [email, setEmail] = useState('');
+const EmailKitModal: React.FC<EmailKitModalProps> = ({ items, projectTitle, onClose, onSend, currentUserEmail }) => {
+  const [email, setEmail] = useState(currentUserEmail || '');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -30,6 +31,10 @@ const EmailKitModal: React.FC<EmailKitModalProps> = ({ items, projectTitle, onCl
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUserEmail) {
+        setEmailError("Sign in to email your kit");
+        return;
+    }
     if (!email) {
         setEmailError("Destination required");
         return;
@@ -43,8 +48,8 @@ const EmailKitModal: React.FC<EmailKitModalProps> = ({ items, projectTitle, onCl
     try {
       await onSend(email);
       setIsSuccess(true);
-    } catch (err) {
-      setEmailError("Transmission error. Please try again.");
+    } catch (err: any) {
+      setEmailError(err?.message || "Transmission error. Please try again.");
     } finally {
       setIsSending(false);
     }
@@ -111,6 +116,11 @@ const EmailKitModal: React.FC<EmailKitModalProps> = ({ items, projectTitle, onCl
                     }`}
                     required
                 />
+                {!currentUserEmail && !emailError && (
+                    <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mt-2 ml-1">
+                        Sign in to email your kit
+                    </p>
+                )}
                 {emailError && (
                     <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mt-2 ml-1 animate-fade-in">
                         {emailError}
@@ -121,8 +131,8 @@ const EmailKitModal: React.FC<EmailKitModalProps> = ({ items, projectTitle, onCl
               <div className="flex flex-col gap-3">
                   <button 
                     type="submit"
-                    disabled={isSending}
-                    className={`w-full py-5 bg-[#7D8FED] text-white font-black rounded-2xl uppercase tracking-[0.2em] text-xs shadow-xl shadow-[#7D8FED]/20 hover:bg-[#6b7ae6] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 ${isSending ? 'animate-pulse' : ''}`}
+                    disabled={isSending || !currentUserEmail}
+                    className={`w-full py-5 bg-[#7D8FED] disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-2xl uppercase tracking-[0.2em] text-xs shadow-xl shadow-[#7D8FED]/20 hover:bg-[#6b7ae6] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 ${isSending ? 'animate-pulse' : ''}`}
                   >
                     {isSending ? <RefreshCwIcon className="w-5 h-5 animate-spin" /> : <SparkleIcon className="w-5 h-5" />}
                     {isSending ? `Syncing to ${email.split('@')[0]}...` : 'Dispatch to Workbench'}

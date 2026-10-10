@@ -226,7 +226,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ videoTitle, products, tra
     } catch (error: any) {
       console.error("Chat error:", error);
       let errorText = "I'm having trouble connecting to the workshop brain. Please check your connection.";
-      if (error?.message?.includes('429')) {
+      if (error?.name === 'ApiError') {
+          errorText = error.message;
+      } else if (error?.message?.includes('429')) {
           errorText = "The workshop assistant is currently in high demand. Please try again in a few moments.";
       }
 

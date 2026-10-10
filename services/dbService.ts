@@ -172,6 +172,11 @@ export const dbService = {
     return !!res;
   },
 
+  // Public creator card for a video (display name, handle, tip info). Never includes the creator's email.
+  async getVideoCreator(videoId: number): Promise<Partial<User> | null> {
+    return apiFetch<Partial<User>>(`/api/videos/${videoId}/creator`);
+  },
+
   async getUser(email: string): Promise<User | null> {
     const data = await apiFetch<User>(`/api/users/${encodeURIComponent(email)}`);
     return data || null;

@@ -45,7 +45,78 @@ const getStripe = () => {
   return stripeInstance;
 };
 
-app.use(express.json({ limit: '50mb' })); // Increase limit for images
+// Webhook for subscription updates.
+// Registered BEFORE express.json so Stripe gets the exact raw body it signed.
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!sig || !webhookSecret) {
+    console.error("[Stripe Webhook] Missing stripe-signature header or STRIPE_WEBHOOK_SECRET");
+    return res.status(400).send('Webhook Error: Missing signature or secret');
+  }
+
+  let event;
+
+  try {
+    event = getStripe().webhooks.constructEvent(req.body, sig, webhookSecret);
+  } catch (err: any) {
+    console.error("[Stripe Webhook] Signature verification failed:", err);
+    return res.status(400).send('Webhook signature verification failed');
+  }
+
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object as any;
+        const sessionEmail = session.metadata?.email;
+        const tier = session.metadata?.tier;
+
+        if (typeof sessionEmail !== 'string' || !sessionEmail || !['Plus', 'Pro', 'Studio'].includes(tier)) {
+          console.error(`[Stripe Webhook] checkout.session.completed ${session.id} missing/invalid metadata (email or tier); no update applied`);
+          return res.json({ received: true });
+        }
+
+        // Calculate XP reward based on tier
+        let xpReward = 0;
+        if (tier === 'Plus') xpReward = 500;
+        else if (tier === 'Pro') xpReward = 1500;
+        else if (tier === 'Studio') xpReward = 3000;
+
+        const database = await getDb();
+        await database.collection("users").updateOne(
+          { email: sessionEmail.toLowerCase() },
+          { 
+            $set: { subscriptionStatus: tier },
+            $inc: { makerXP: xpReward }
+          }
+        );
+        await database.collection("videos").updateMany(
+          { creatorId: sessionEmail.toLowerCase() },
+          { $set: { creatorSubscriptionStatus: tier } }
+        );
+        break;
+      }
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as any;
+        // In a real app we'd look up email by customer ID
+        // But for this purpose let's assume metadata or similar works or we just log it
+        // For testing/mocking in this environment we can use the manual handleCancel if needed
+        console.log(`Subscription deleted: ${subscription.id}`);
+        break;
+      }
+    }
+  } catch (e: any) {
+    // 500 (no details) so Stripe retries the delivery
+    console.error("[Stripe Webhook] Processing failed:", e);
+    return res.status(500).send('Webhook processing failed');
+  }
+
+  res.json({ received: true });
+});
+
+// JSON body parser for every other route. Vercel caps request bodies at ~4.5MB anyway.
+app.use(express.json({ limit: '4mb' }));
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -268,7 +339,6 @@ function sanitizeUser(user: any) {
 function publicProfile(user: any) {
   if (!user) return null;
   return {
-    email: user.email,
     displayName: user.displayName || '',
     handle: user.handle || '',
     bio: user.bio || '',
@@ -276,9 +346,158 @@ function publicProfile(user: any) {
     tipQrUrl: user.tipQrUrl || '',
     venmoHandle: user.venmoHandle || '',
     makerRank: user.makerRank || 'Apprentice',
-    isVerifiedPartner: !!user.isVerifiedPartner,
-    subscriptionStatus: user.subscriptionStatus || 'Free'
+    isVerifiedPartner: !!user.isVerifiedPartner
   };
+}
+
+// Logs the real error on the server and returns a generic message to the client.
+function sendServerError(res: express.Response, tag: string, e: any) {
+  console.error(tag, e);
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+}
+
+// --- RATE LIMITING ---
+// In-memory, per serverless instance. Instances don't share memory, so this limits
+// casual abuse per instance, not a determined distributed attacker.
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+let rateLimitCalls = 0;
+
+function clientIp(req: express.Request): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0]?.trim();
+  return first || req.socket.remoteAddress || 'unknown';
+}
+
+function rateLimit(name: string, max: number, windowMs: number, keyFn: (req: express.Request) => string | null) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+
+    rateLimitCalls++;
+    if (rateLimitCalls % 500 === 0) {
+      for (const [k, bucket] of rateBuckets) {
+        if (now > bucket.resetAt) rateBuckets.delete(k);
+      }
+    }
+
+    const keyPart = keyFn(req);
+    if (keyPart === null) return next();
+    const key = `${name}:${keyPart}`;
+
+    let bucket = rateBuckets.get(key);
+    if (!bucket || now > bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      rateBuckets.set(key, bucket);
+    }
+    bucket.count++;
+
+    if (bucket.count > max) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
+      return res.status(429).json({ error: "Too many requests. Please try again later." });
+    }
+    next();
+  };
+}
+
+const byIp = (req: express.Request) => clientIp(req);
+const byUser = (req: express.Request) => (req as any).user?.email?.toLowerCase() || null;
+
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const loginLimit = rateLimit('login', 10, 15 * MINUTE, byIp);
+const signupLimit = rateLimit('signup', 5, HOUR, byIp);
+const forgotPasswordLimit = rateLimit('forgot', 5, HOUR, byIp);
+const resetPasswordLimit = rateLimit('reset', 10, HOUR, byIp);
+const contactLimit = rateLimit('contact', 5, HOUR, byIp);
+const emailSendLimit = rateLimit('email', 20, HOUR, byUser);
+const aiLimit = rateLimit('ai', 30, 10 * MINUTE, byUser);
+// Price checks run automatically when a signed-in user opens a hub, so they get their own bucket
+// instead of eating into the analyze/chat allowance.
+const aiRevalidateLimit = rateLimit('aiRevalidate', 60, 10 * MINUTE, byUser);
+const incrementLimit = rateLimit('increment', 300, HOUR, byIp);
+const betaFeedbackLimit = rateLimit('feedback', 5, HOUR, byIp);
+
+// --- AI DAILY BUDGET ---
+const AI_DAILY_LIMIT_USD = Number(process.env.AI_DAILY_LIMIT_USD || 20);
+
+async function aiBudgetExceeded(): Promise<boolean> {
+  const database = await getDb();
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [row] = await database.collection("ai_usage_logs").aggregate([
+    { $match: { timestamp: { $gte: oneDayAgo } } },
+    { $group: { _id: null, total: { $sum: "$estimatedCost" } } }
+  ]).toArray();
+  return (row?.total || 0) >= AI_DAILY_LIMIT_USD;
+}
+
+async function aiBudgetGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    if (await aiBudgetExceeded()) {
+      console.error("[AI Budget] daily limit reached");
+      return res.status(503).json({ error: "AI is temporarily paused. Please try again later." });
+    }
+    next();
+  } catch (e: any) {
+    sendServerError(res, '[AI Budget]', e);
+  }
+}
+
+// --- HTML / EMAIL HELPERS ---
+function escapeHtml(value: any): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const EMAIL_REGEX = /^[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[^\s@<>()"',;:]+$/;
+
+function isValidEmail(value: any): value is string {
+  return typeof value === 'string' && value.length <= 254 && EMAIL_REGEX.test(value);
+}
+
+function stripCrLf(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').trim();
+}
+
+// Strips active content from client-built email HTML while keeping inline-styled markup.
+function sanitizeEmailHtml(html: string): string {
+  let out = html;
+  // Elements removed together with their content
+  out = out.replace(/<(script|style|iframe|object|form|button)\b[\s\S]*?<\/\1\s*>/gi, '');
+  // Remaining opening/closing/self-closing tags of blocked elements (incl. void elements)
+  out = out.replace(/<\/?(script|style|iframe|object|embed|form|input|button|link|meta|base)\b[^>]*>/gi, '');
+  // Inline event handlers: on*="..." / on*='...' / on*=value
+  out = out.replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  // Dangerous URL schemes in href/src (data:image/ is allowed)
+  out = out.replace(/\b(href|src)\s*=\s*(?:"\s*(?:javascript:|vbscript:|data:(?!image\/))[^"]*"|'\s*(?:javascript:|vbscript:|data:(?!image\/))[^']*'|(?:javascript:|vbscript:|data:(?!image\/))[^\s>]*)/gi, '$1="#"');
+  return out;
+}
+
+// --- VIDEO OWNERSHIP ---
+const AI_CREATOR_ID = 'ai@watch1do1.com';
+const VIDEO_STATUSES = ['curating', 'pending_review', 'published', 'rejected'];
+
+function canEditVideo(user: any, video: any): boolean {
+  if (!user || !video) return false;
+  if (user.isAdmin === true) return true;
+  if (typeof video.creatorId === 'string' && video.creatorId.toLowerCase() === user.email.toLowerCase()) return true;
+  return !!(user.isVerifiedPartner && user.partnerId && Array.isArray(video.products) &&
+    video.products.some((p: any) => p?.merchantId && p.merchantId === user.partnerId));
+}
+
+function pickFields(source: any, fields: string[]): Record<string, any> {
+  const out: Record<string, any> = {};
+  if (!source || typeof source !== 'object') return out;
+  for (const key of fields) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      out[key] = source[key];
+    }
+  }
+  return out;
 }
 
 
@@ -328,9 +547,17 @@ async function logAiUsage(endpoint: string, model: string, estimatedCost: number
 }
 
 // STRIPE ROUTES
-app.post('/api/stripe/create-checkout-session', async (req, res) => {
+app.post('/api/stripe/create-checkout-session', requireAuth, async (req, res) => {
   try {
-    const { tier, email, interval } = req.body;
+    const { tier, interval } = req.body;
+    const email = (req as any).user.email.toLowerCase();
+
+    if (!['Plus', 'Pro', 'Studio'].includes(tier)) {
+      return res.status(400).json({ error: "Invalid plan" });
+    }
+    if (interval !== undefined && interval !== 'monthly' && interval !== 'annual') {
+      return res.status(400).json({ error: "Invalid billing interval" });
+    }
     
     const isAnnual = interval === 'annual';
     const priceIds: Record<string, string | undefined> = {
@@ -341,8 +568,9 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
 
     const priceId = priceIds[tier];
     if (!priceId) {
-      // Fallback for development if keys aren't set
-      return res.json({ url: `https://checkout.stripe.com/pay/dummy_${tier.toLowerCase()}` });
+      const missingVar = `STRIPE_PRICE_${tier.toUpperCase()}${isAnnual ? '_ANNUAL' : ''}`;
+      console.error(`[Stripe Error] ${missingVar} is not set`);
+      return res.status(500).json({ error: "Checkout is not configured" });
     }
 
     const host = req.headers['host'];
@@ -370,76 +598,22 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
 
     res.json({ url: session.url });
   } catch (e: any) {
-    console.error("[Stripe Error]", e);
-    res.status(500).json({ error: e.message });
+    sendServerError(res, "[Stripe Error]", e);
   }
-});
-
-// Webhook for subscription updates
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!sig || !webhookSecret) {
-    return res.status(400).send('Webhook Error: Missing signature or secret');
-  }
-
-  let event;
-
-  try {
-    event = getStripe().webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err: any) {
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  const database = await getDb();
-
-  switch (event.type) {
-    case 'checkout.session.completed':
-      const session = event.data.object as any;
-      const { email: sessionEmail, tier } = session.metadata;
-      
-      // Calculate XP reward based on tier
-      let xpReward = 0;
-      if (tier === 'Plus') xpReward = 500;
-      else if (tier === 'Pro') xpReward = 1500;
-      else if (tier === 'Studio') xpReward = 3000;
-
-      await database.collection("users").updateOne(
-        { email: sessionEmail.toLowerCase() },
-        { 
-          $set: { subscriptionStatus: tier },
-          $inc: { makerXP: xpReward }
-        }
-      );
-      await database.collection("videos").updateMany(
-        { creatorId: sessionEmail.toLowerCase() },
-        { $set: { creatorSubscriptionStatus: tier } }
-      );
-      break;
-    case 'customer.subscription.deleted':
-      const subscription = event.data.object as any;
-      // In a real app we'd look up email by customer ID
-      // But for this purpose let's assume metadata or similar works or we just log it
-      // For testing/mocking in this environment we can use the manual handleCancel if needed
-      console.log(`Subscription deleted: ${subscription.id}`);
-      break;
-  }
-
-  res.json({ received: true });
 });
 
 const RESEND_SENDER = 'Watch1Do1 <security@watch1do1.com>';
 
 // --- AUTHENTICATION ROUTES ---
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', signupLimit, async (req, res) => {
     try {
         if (!hasValidSessionSecret()) {
             return res.status(500).json({ error: "Server misconfigured" });
         }
         const { email, password, isOver18 } = req.body;
         if (!email || !password) return res.status(400).json({ error: "Missing identity data" });
+        if (typeof email !== 'string') return res.status(400).json({ error: "Missing identity data" });
         if (typeof password !== 'string' || password.length < 8) {
             return res.status(400).json({ error: "Password must be at least 8 characters" });
         }
@@ -479,17 +653,17 @@ app.post('/api/auth/signup', async (req, res) => {
         setSessionCookie(res, token);
         res.json({ user: sanitizeUser(newUser) });
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[POST /api/auth/signup]', e);
     }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimit, async (req, res) => {
     try {
         if (!hasValidSessionSecret()) {
             return res.status(500).json({ error: "Server misconfigured" });
         }
         const { email, password } = req.body;
-        if (!email || !password) {
+        if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
             return res.status(400).json({ error: "Missing email or password" });
         }
 
@@ -509,7 +683,7 @@ app.post('/api/auth/login', async (req, res) => {
 
         res.json({ user: sanitizeUser(user) });
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[POST /api/auth/login]', e);
     }
 });
 
@@ -524,7 +698,7 @@ app.get('/api/auth/me', loadUser, async (req, res) => {
         }
         res.json({ user: sanitizeUser(user) });
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[GET /api/auth/me]', e);
     }
 });
 
@@ -533,7 +707,7 @@ app.post('/api/auth/logout', (req, res) => {
     res.json({ success: true });
 });
 
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password', forgotPasswordLimit, async (req, res) => {
     try {
         const { email } = req.body;
         if (!email || typeof email !== 'string') {
@@ -600,14 +774,14 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         
         res.json({ success: true, message: "If that email has an account, a reset link has been sent." });
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[POST /api/auth/forgot-password]', e);
     }
 });
 
-app.post('/api/auth/reset-password', async (req, res) => {
+app.post('/api/auth/reset-password', resetPasswordLimit, async (req, res) => {
     try {
         const { email, token, newPassword } = req.body;
-        if (!email || !token || !newPassword) {
+        if (!email || !token || !newPassword || typeof email !== 'string' || typeof token !== 'string' || typeof newPassword !== 'string') {
             return res.status(400).json({ error: "Missing required fields" });
         }
         if (typeof newPassword !== 'string' || newPassword.length < 8) {
@@ -636,7 +810,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
         res.json({ success: true });
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[POST /api/auth/reset-password]', e);
     }
 });
 
@@ -648,7 +822,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
         const users = await database.collection("users").find({}).toArray();
         res.json(users.map(sanitizeUser));
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[GET /api/admin/users]', e);
     }
 });
 
@@ -704,16 +878,30 @@ app.post('/api/admin/users/update', requireAdmin, async (req, res) => {
 
         res.json({ success: true });
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[POST /api/admin/users/update]', e);
     }
 });
 
-app.post('/api/contact', async (req, res) => {
+app.post('/api/contact', contactLimit, async (req, res) => {
     try {
         const { name, email, subject, message } = req.body;
+
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ error: "Please enter a valid email address." });
+        }
+        if (typeof name !== 'string' || name.length > 100) {
+            return res.status(400).json({ error: "Name must be 100 characters or fewer." });
+        }
+        if (typeof subject !== 'string' || subject.length > 200) {
+            return res.status(400).json({ error: "Subject must be 200 characters or fewer." });
+        }
+        if (typeof message !== 'string' || !message.trim() || message.length > 5000) {
+            return res.status(400).json({ error: "Message is required and must be 5000 characters or fewer." });
+        }
+
         const resendKey = process.env.RESEND_API_KEY;
         
-        console.log(`[Contact] Transmission initialized from ${email}`);
+        console.log("[Contact] Transmission initialized");
 
         if (resendKey) {
             const resend = new Resend(resendKey);
@@ -726,16 +914,16 @@ app.post('/api/contact', async (req, res) => {
                 from: `Watch1Do1 <${fromEmail}>`,
                 to: recipientEmail,
                 replyTo: email,
-                subject: `New Workshop Inquiry: ${subject}`,
+                subject: `New Workshop Inquiry: ${stripCrLf(subject)}`,
                 html: `
                     <div style="font-family: sans-serif; background: #020617; color: #f8fafc; padding: 40px; border-radius: 24px;">
                         <h2 style="color: #7D8FED; margin-top: 0;">New Workshop Inquiry</h2>
                         <p style="margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 10px;">
-                            <strong>From:</strong> ${name} (&lt;${email}&gt;)<br/>
-                            <strong>Vector:</strong> ${subject}
+                            <strong>From:</strong> ${escapeHtml(name)} (&lt;${escapeHtml(email)}&gt;)<br/>
+                            <strong>Vector:</strong> ${escapeHtml(subject)}
                         </p>
                         <div style="background: #0f172a; padding: 25px; border-radius: 16px; border: 1px solid #1e293b;">
-                            <p style="white-space: pre-wrap; margin: 0; line-height: 1.6; color: #94a3b8;">${message}</p>
+                            <p style="white-space: pre-wrap; margin: 0; line-height: 1.6; color: #94a3b8;">${escapeHtml(message)}</p>
                         </div>
                         <p style="font-size: 11px; color: #475569; margin-top: 20px;">
                             Watch1Do1 Automated Relay Protocol
@@ -756,103 +944,151 @@ app.post('/api/contact', async (req, res) => {
             res.json({ success: true, warning: 'Simulated' });
         }
     } catch (e: any) {
-        console.error("[Contact] Error:", e);
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[Contact] Error:', e);
+    }
+});
+
+// Transactional email relay used by the client (kit emails, admin approval/rejection notices).
+// Locked down: signed-in users only, non-admins may only email themselves.
+app.post('/api/email/send', requireAuth, emailSendLimit, async (req, res) => {
+    try {
+        const reqUser = (req as any).user;
+        const { to, subject, html } = req.body;
+
+        if (!isValidEmail(to)) {
+            return res.status(400).json({ error: "A single valid recipient email is required." });
+        }
+        if (typeof subject !== 'string' || !stripCrLf(subject) || subject.length > 200) {
+            return res.status(400).json({ error: "Subject is required and must be 200 characters or fewer." });
+        }
+        if (typeof html !== 'string' || !html || html.length > 100 * 1024) {
+            return res.status(400).json({ error: "Email body is required and must be under 100KB." });
+        }
+
+        if (reqUser.isAdmin !== true && to.toLowerCase() !== reqUser.email.toLowerCase()) {
+            return res.status(403).json({ error: "You can only send emails to your own address." });
+        }
+
+        const resendKey = process.env.RESEND_API_KEY;
+        if (!resendKey) {
+            console.error("[EmailAPI] RESEND_API_KEY missing");
+            return res.status(503).json({ error: "Email is not configured" });
+        }
+
+        const resend = new Resend(resendKey);
+        const data = await resend.emails.send({
+            from: 'Watch1Do1 <onboarding@resend.dev>',
+            to,
+            subject: stripCrLf(subject),
+            html: sanitizeEmailHtml(html)
+        });
+
+        if ((data as any).error) {
+            return sendServerError(res, '[EmailAPI] Resend API Error:', (data as any).error);
+        }
+
+        res.json({ success: true });
+    } catch (e: any) {
+        sendServerError(res, '[EmailAPI] Error:', e);
     }
 });
 
 // AI ROUTES
-app.post('/api/ai/products/text', async (req, res) => {
+app.post('/api/ai/products/text', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
   try {
     const { text, category } = req.body;
     const products = await generateProductsFromText(text, category);
     await logAiUsage('/api/ai/products/text', 'gemini-3.5-flash', 0.00056, category);
     res.json(products);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/ai/products/text]', e);
   }
 });
 
-app.post('/api/ai/products/images', async (req, res) => {
+app.post('/api/ai/products/images', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
   try {
     const { images, mimeType, category } = req.body;
     const products = await generateProductsFromImages(images, mimeType, category);
     await logAiUsage('/api/ai/products/images', 'gemini-3.5-flash', 0.00058, category);
     res.json(products);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/ai/products/images]', e);
   }
 });
 
-app.post('/api/ai/products/url', async (req, res) => {
+app.post('/api/ai/products/url', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
   try {
     const { url, category } = req.body;
     const products = await generateProductsFromUrl(url, category);
     await logAiUsage('/api/ai/products/url', 'gemini-3.5-flash', 0.00062, category);
     res.json(products);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/ai/products/url]', e);
   }
 });
 
-app.post('/api/ai/products/deepdive', async (req, res) => {
+app.post('/api/ai/products/deepdive', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
     try {
         const { title, existing, category } = req.body;
         const products = await generateDeepDiveProducts(title, existing, category);
         await logAiUsage('/api/ai/products/deepdive', 'gemini-3.5-flash', 0.00056, category);
         res.json(products);
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[POST /api/ai/products/deepdive]', e);
     }
 });
 
-app.post('/api/ai/products/complementary', async (req, res) => {
+app.post('/api/ai/products/complementary', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
   try {
     const { title, existing, category } = req.body;
     const products = await generateComplementaryProducts(title, existing, category);
     await logAiUsage('/api/ai/products/complementary', 'gemini-3.5-flash', 0.00045, category);
     res.json(products);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/ai/products/complementary]', e);
   }
 });
 
-app.post('/api/ai/insights', async (req, res) => {
+app.post('/api/ai/insights', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
   try {
     const { title, products, category } = req.body;
     const insights = await generateV3ProjectInsights(title, products, category);
     await logAiUsage('/api/ai/insights', 'gemini-3.1-pro-preview', 0.01375, category);
     res.json(insights);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/ai/insights]', e);
   }
 });
 
-app.post('/api/ai/search', async (req, res) => {
+app.post('/api/ai/search', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
   try {
     const { query } = req.body;
     const products = await searchSpecificProduct(query);
     await logAiUsage('/api/ai/search', 'gemini-3.5-flash', 0.00056);
     res.json(products);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/ai/search]', e);
   }
 });
 
-app.post('/api/ai/revalidate', async (req, res) => {
+app.post('/api/ai/revalidate', requireAuth, aiRevalidateLimit, aiBudgetGuard, async (req, res) => {
   try {
     const { product } = req.body;
     const update = await revalidateProductAvailability(product);
     await logAiUsage('/api/ai/revalidate', 'gemini-3.5-flash', 0.00045, product?.category);
     res.json(update);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/ai/revalidate]', e);
   }
 });
 
-app.post('/api/ai/chat', async (req, res) => {
+app.post('/api/ai/chat', requireAuth, aiLimit, aiBudgetGuard, async (req, res) => {
   try {
-    const { videoTitle, products, message, history } = req.body;
+    const { videoTitle, products, message } = req.body;
+    if (typeof message !== 'string' || !message.trim() || message.length > 4000) {
+      return res.status(400).json({ error: "Message is required and must be 4000 characters or fewer." });
+    }
+    const history = Array.isArray(req.body.history) ? req.body.history.slice(-20) : [];
 
     const chatInstance = createProjectAssistantChat(videoTitle, products);
 
@@ -877,11 +1113,11 @@ app.post('/api/ai/chat', async (req, res) => {
     res.write('data: [DONE]\n\n');
     res.end();
   } catch (e: any) {
-    console.error("[Server Chat Error]:", e);
     if (!res.headersSent) {
-      res.status(500).json({ error: e.message });
+      sendServerError(res, "[Server Chat Error]:", e);
     } else {
-      res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+      console.error("[Server Chat Error]:", e);
+      res.write(`data: ${JSON.stringify({ error: "Something went wrong" })}\n\n`);
       res.end();
     }
   }
@@ -916,7 +1152,7 @@ app.get('/api/ebay/search', async (req, res) => {
     
     res.json(normalized);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[GET /api/ebay/search]', e);
   }
 });
 
@@ -926,7 +1162,7 @@ app.get('/api/ebay/item/:id', async (req, res) => {
     const item = await getEbayItem(id);
     res.json(item);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[GET /api/ebay/item/:id]', e);
   }
 });
 
@@ -942,17 +1178,15 @@ app.get('/api/ebay/account-deletion', (req, res) => {
 
   console.log("--- eBay Account Deletion Validation ---");
   console.log("Time:", new Date().toISOString());
-  console.log("Challenge Code:", challengeCode);
   console.log("Verification Token (exists):", !!verificationToken);
   console.log("Calculated Endpoint URL:", endpoint);
 
-  if (!challengeCode || !verificationToken) {
-    console.error("Missing challengeCode or verificationToken");
-    return res.status(200).json({ 
-      error: `Missing parameters. To verify, add ?challenge_code=test to the ${endpoint} URL.`,
-      verificationToken: verificationToken ? "Set (Hidden for security)" : "Missing",
-      calculatedEndpoint: endpoint
-    });
+  if (!verificationToken) {
+    console.error("[eBay Deletion] EBAY_DELETION_VERIFICATION_TOKEN is not set");
+    return res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+  if (!challengeCode) {
+    return res.status(400).json({ error: "Missing challenge_code" });
   }
 
   try {
@@ -961,8 +1195,6 @@ app.get('/api/ebay/account-deletion', (req, res) => {
     hash.update(verificationToken);
     hash.update(endpoint);
     const responseHash = hash.digest('hex');
-
-    console.log("Generated Hash:", responseHash);
 
     return res.status(200).json({
       challengeResponse: responseHash
@@ -980,55 +1212,170 @@ app.post('/api/ebay/account-deletion', (req, res) => {
 
 // API ROUTES
 
-app.get('/api/videos', async (req, res) => {
+// Fields a client may send when creating a video. Everything else is set server-side.
+const VIDEO_CREATE_FIELDS = [
+  'creator', 'creatorHandle', 'creatorDisplayName', 'sourceType', 'category', 'suggestedCategory',
+  'title', 'description', 'videoUrl', 'thumbnailUrl', 'sourceImageUrl', 'products',
+  'complementaryProducts', 'insights', 'legalConfirmed', 'epnCampId'
+];
+const VIDEO_ADMIN_PATCH_FIELDS = ['status', 'title', 'products', 'complementaryProducts', 'insights', 'epnCampId', 'category', 'creatorSubscriptionStatus'];
+const VIDEO_OWNER_PATCH_FIELDS = ['title', 'products', 'complementaryProducts', 'insights', 'status'];
+const VIDEO_AI_REFINE_FIELDS = ['products', 'complementaryProducts'];
+const VIDEO_INCREMENT_FIELDS = ['stats.views', 'stats.clicks', 'stats.addToKitCount', 'ratingCount', 'activeBuilders'];
+
+app.get('/api/videos', loadUser, async (req, res) => {
   try {
+    const reqUser = (req as any).user;
+    const isAdmin = reqUser?.isAdmin === true;
+    const requesterEmail = reqUser?.email?.toLowerCase();
+
     const database = await getDb();
+    const query = isAdmin
+      ? {}
+      : (requesterEmail
+          ? { $or: [{ status: 'published' }, { creatorId: requesterEmail }] }
+          : { status: 'published' });
     const videos = await database.collection("videos")
-      .find({})
+      .find(query)
       .sort({ id: -1 })
       .toArray();
-    res.json(videos);
+
+    // Creator emails are only visible to the creator themselves and admins.
+    // Tip details come from GET /api/videos/:id/creator instead of the list.
+    const visible = videos.map((v: any) => {
+      const { creatorTipQrUrl, creatorVenmoHandle, ...rest } = v;
+      const creatorId = typeof v.creatorId === 'string' ? v.creatorId.toLowerCase() : '';
+      if (isAdmin || creatorId === AI_CREATOR_ID || (requesterEmail && creatorId === requesterEmail)) {
+        return rest;
+      }
+      return { ...rest, creatorId: '' };
+    });
+    res.json(visible);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[GET /api/videos]', e);
   }
 });
 
-app.post('/api/videos', async (req, res) => {
+app.post('/api/videos', requireAuth, async (req, res) => {
   try {
+    const reqUser = (req as any).user;
+    const id = req.body?.id;
+    if (typeof id !== 'number' || !Number.isFinite(id)) {
+      return res.status(400).json({ error: "Invalid video id" });
+    }
+
+    const doc: Record<string, any> = {
+      ...pickFields(req.body, VIDEO_CREATE_FIELDS),
+      id,
+      activeBuilders: 0,
+      rating: 0,
+      ratingCount: 0,
+      stats: { views: 0, clicks: 0, sales: 0, tips: 0, addToKitCount: 0 }
+    };
+
+    if (req.body.creatorId === AI_CREATOR_ID) {
+      // Existing AI-scan flow: AI hubs publish immediately
+      doc.creatorId = AI_CREATOR_ID;
+      doc.status = 'published';
+    } else {
+      doc.creatorId = reqUser.email.toLowerCase();
+      doc.creatorSubscriptionStatus = reqUser.subscriptionStatus || 'Free';
+      doc.status = (reqUser.isAdmin === true && VIDEO_STATUSES.includes(req.body.status)) ? req.body.status : 'curating';
+    }
+
     const database = await getDb();
-    const result = await database.collection("videos").insertOne(req.body);
-    res.json(result);
+    const existing = await database.collection("videos").findOne({ id });
+    if (existing) {
+      return res.status(409).json({ error: "A video with this id already exists" });
+    }
+
+    await database.collection("videos").insertOne(doc);
+    res.json({ success: true, id });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/videos]', e);
   }
 });
 
-app.patch('/api/videos/:id', async (req, res) => {
+app.patch('/api/videos/:id', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const reqUser = (req as any).user;
+    const id = Number(req.params.id);
     const database = await getDb();
-    const result = await database.collection("videos").updateOne(
-      { id: Number(id) },
-      { $set: req.body }
-    );
-    res.json(result);
+    const video = await database.collection("videos").findOne({ id });
+    if (!video) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    let updates: Record<string, any>;
+    if (reqUser.isAdmin === true) {
+      updates = pickFields(req.body, VIDEO_ADMIN_PATCH_FIELDS);
+      if (updates.hasOwnProperty('status') && !VIDEO_STATUSES.includes(updates.status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+    } else if (video.creatorId === AI_CREATOR_ID) {
+      // Existing "refine" flow: any signed-in maker can improve an AI hub's product list (status is ignored)
+      updates = pickFields(req.body, VIDEO_AI_REFINE_FIELDS);
+    } else if (canEditVideo(reqUser, video)) {
+      updates = pickFields(req.body, VIDEO_OWNER_PATCH_FIELDS);
+      if (updates.hasOwnProperty('status') && !['pending_review', 'curating'].includes(updates.status)) {
+        return res.status(403).json({ error: "Not allowed" });
+      }
+    } else {
+      return res.status(403).json({ error: "Not allowed" });
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await database.collection("videos").updateOne({ id }, { $set: updates });
+    }
+    res.json({ success: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[PATCH /api/videos/:id]', e);
   }
 });
 
-app.post('/api/videos/:id/increment', async (req, res) => {
+app.post('/api/videos/:id/increment', incrementLimit, async (req, res) => {
   try {
     const { id } = req.params;
     const { field } = req.body;
+    if (!VIDEO_INCREMENT_FIELDS.includes(field)) {
+      return res.status(400).json({ error: "Invalid field" });
+    }
     const database = await getDb();
-    const result = await database.collection("videos").updateOne(
+    await database.collection("videos").updateOne(
       { id: Number(id) },
       { $inc: { [field]: 1 } }
     );
-    res.json(result);
+    res.json({ success: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/videos/:id/increment]', e);
+  }
+});
+
+// Public creator card for a video (tip info etc.). Never exposes the creator's email.
+app.get('/api/videos/:id/creator', loadUser, async (req, res) => {
+  try {
+    const reqUser = (req as any).user;
+    const id = Number(req.params.id);
+    const database = await getDb();
+    const video = await database.collection("videos").findOne({ id });
+    // Unpublished hubs are only visible to their creator and admins (same rule as the video list)
+    const canSeeVideo = video && (video.status === 'published' || reqUser?.isAdmin === true ||
+      (typeof video.creatorId === 'string' && reqUser && video.creatorId.toLowerCase() === reqUser.email.toLowerCase()));
+    if (!canSeeVideo) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    if (video.creatorId === AI_CREATOR_ID) {
+      return res.json({});
+    }
+    const creator = typeof video.creatorId === 'string'
+      ? await database.collection("users").findOne({ email: video.creatorId.toLowerCase() })
+      : null;
+    if (!creator) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json(publicProfile(creator));
+  } catch (e: any) {
+    sendServerError(res, '[GET /api/videos/:id/creator]', e);
   }
 });
 
@@ -1056,11 +1403,11 @@ app.post('/api/users/subscription', requireAuth, async (req, res) => {
     
     res.json({ success: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/users/subscription]', e);
   }
 });
 
-app.get('/api/users/:email', loadUser, async (req, res) => {
+app.get('/api/users/:email', requireAuth, async (req, res) => {
   try {
     const emailParam = (Array.isArray(req.params.email) ? req.params.email[0] : req.params.email)?.toLowerCase();
     if (!emailParam) {
@@ -1073,14 +1420,37 @@ app.get('/api/users/:email', loadUser, async (req, res) => {
     }
 
     const reqUser = (req as any).user;
-    if (reqUser && (reqUser.email.toLowerCase() === emailParam || reqUser.isAdmin === true)) {
+    if (reqUser.email.toLowerCase() === emailParam || reqUser.isAdmin === true) {
       return res.json(sanitizeUser(doc));
     }
-    return res.json(publicProfile(doc));
+    // Same response as a missing account, so this can't be used to check whether an email is registered
+    return res.status(404).json({ error: "Not found" });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[GET /api/users/:email]', e);
   }
 });
+
+// Validates user-editable profile text. Only values that actually change are checked, so
+// existing (older) values that predate these rules don't block unrelated saves.
+function validateProfileFields(updates: Record<string, any>, currentUser: any): string | null {
+  const { handle, displayName, bio } = updates;
+  if (handle !== undefined && handle !== null && handle !== '' && handle !== currentUser?.handle) {
+    if (typeof handle !== 'string' || !/^[a-z0-9_]{3,30}$/.test(handle.toLowerCase())) {
+      return "Handle must be 3-30 letters, numbers or underscores";
+    }
+  }
+  if (displayName !== undefined && displayName !== currentUser?.displayName) {
+    if (typeof displayName !== 'string' || displayName.length > 60) {
+      return "Display name must be 60 characters or fewer";
+    }
+  }
+  if (bio !== undefined && bio !== currentUser?.bio) {
+    if (typeof bio !== 'string' || bio.length > 500) {
+      return "Bio must be 500 characters or fewer";
+    }
+  }
+  return null;
+}
 
 const ALLOWED_USER_UPSERT_FIELDS = [
   'displayName',
@@ -1114,6 +1484,11 @@ app.post('/api/users/upsert', requireAuth, async (req, res) => {
       }
     }
 
+    const profileError = validateProfileFields(allowedUpdates, reqUser);
+    if (profileError) {
+      return res.status(400).json({ error: profileError });
+    }
+
     // Check if handle is taken by someone else
     if (allowedUpdates.handle) {
       const existing = await database.collection("users").findOne({ 
@@ -1139,11 +1514,7 @@ app.post('/api/users/upsert', requireAuth, async (req, res) => {
     const updatedDoc = await database.collection("users").findOne({ email: targetEmail });
     res.json({ success: true, user: sanitizeUser(updatedDoc) });
   } catch (e: any) {
-    console.error("[User Upsert] Fatal Error:", e);
-    res.status(500).json({ 
-      error: e.message,
-      details: "Ensure MONGODB_URI is correctly configured in your environment variables."
-    });
+    sendServerError(res, "[User Upsert] Fatal Error:", e);
   }
 });
 
@@ -1152,6 +1523,10 @@ app.post('/api/users/update-profile', requireAuth, async (req, res) => {
     const reqUser = (req as any).user;
     const targetEmail = reqUser.email.toLowerCase();
     const { displayName, handle, bio, avatarUrl } = req.body;
+    const profileError = validateProfileFields({ displayName, handle, bio }, reqUser);
+    if (profileError) {
+        return res.status(400).json({ error: profileError });
+    }
     const database = await getDb();
     
     // Check if handle is taken by someone else
@@ -1180,25 +1555,65 @@ app.post('/api/users/update-profile', requireAuth, async (req, res) => {
     await logAudit('profile_update', targetEmail, { displayName, handle });
     res.json({ success: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/users/update-profile]', e);
   }
 });
 
 // REPORTING ROUTES
-app.post('/api/reports', async (req, res) => {
+const REPORT_CATEGORIES = ['missing_tool', 'incorrect_step', 'safety_concern', 'out_of_stock', 'other'];
+
+app.post('/api/reports', loadUser, async (req, res, next) => {
+  // Beta feedback (BetaNotificationModal) is allowed signed-out; project reports require sign-in.
+  if (req.body?.category === 'beta_feedback') return betaFeedbackLimit(req, res, next);
+  return requireAuth(req, res, next);
+}, async (req, res) => {
   try {
+    const reqUser = (req as any).user;
+    const { videoId, projectTitle, category, description, reporterEmail } = req.body;
+
+    if (typeof description !== 'string' || !description.trim() || description.length > 2000) {
+      return res.status(400).json({ error: "Description is required and must be 2000 characters or fewer." });
+    }
+
+    let reportData: Record<string, any>;
+    if (category === 'beta_feedback') {
+      // reporterEmail here is an optional contact address typed by the user, not an identity
+      const contactEmail = isValidEmail(reporterEmail) ? reporterEmail.toLowerCase() : null;
+      reportData = {
+        category,
+        description,
+        reporterEmail: reqUser?.email?.toLowerCase() || contactEmail || 'anonymous@watch1do1.com',
+        isSignedIn: !!reqUser
+      };
+    } else {
+      if (typeof videoId !== 'number' || !Number.isFinite(videoId)) {
+        return res.status(400).json({ error: "Invalid video id" });
+      }
+      if (!REPORT_CATEGORIES.includes(category)) {
+        return res.status(400).json({ error: "Invalid report category" });
+      }
+      if (projectTitle !== undefined && (typeof projectTitle !== 'string' || projectTitle.length > 200)) {
+        return res.status(400).json({ error: "Project title must be 200 characters or fewer." });
+      }
+      reportData = {
+        videoId,
+        projectTitle: projectTitle || '',
+        category,
+        description,
+        reporterEmail: reqUser.email.toLowerCase()
+      };
+    }
+
+    reportData.id = crypto.randomUUID();
+    reportData.timestamp = new Date().toISOString();
+    reportData.status = 'pending';
+
     const database = await getDb();
-    const reportData = {
-        ...req.body,
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        status: 'pending'
-    };
-    const result = await database.collection("reports").insertOne(reportData);
+    await database.collection("reports").insertOne(reportData);
     await logAudit('project_reported', reportData.reporterEmail, { videoId: reportData.videoId, category: reportData.category });
     res.json({ success: true, id: reportData.id });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/reports]', e);
   }
 });
 
@@ -1208,7 +1623,7 @@ app.get('/api/admin/reports', requireAdmin, async (req, res) => {
         const reports = await database.collection("reports").find({}).sort({ timestamp: -1 }).toArray();
         res.json(reports);
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[GET /api/admin/reports]', e);
     }
 });
 
@@ -1223,7 +1638,7 @@ app.patch('/api/admin/reports/:id', requireAdmin, async (req, res) => {
         await database.collection("reports").updateOne({ id }, { $set: { status } });
         res.json({ success: true });
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[PATCH /api/admin/reports/:id]', e);
     }
 });
 
@@ -1233,7 +1648,7 @@ app.get('/api/admin/audit-logs', requireAdmin, async (req, res) => {
         const logs = await database.collection("audit_logs").find({}).sort({ timestamp: -1 }).limit(100).toArray();
         res.json(logs);
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[GET /api/admin/audit-logs]', e);
     }
 });
 
@@ -1278,28 +1693,55 @@ app.get('/api/admin/system-status', requireAdmin, async (req, res) => {
             totalAiCost,
             dailyCost,
             weeklyCost,
-            dailyLimit: 20.0,
-            dailyLimitExceeded: dailyCost > 20.0,
+            dailyLimit: AI_DAILY_LIMIT_USD,
+            dailyLimitExceeded: dailyCost >= AI_DAILY_LIMIT_USD,
             modelCounts,
             recentAiCalls
         };
         res.json(status);
     } catch (e: any) {
-        res.status(500).json({ error: e.message });
+        sendServerError(res, '[GET /api/admin/system-status]', e);
     }
 });
 
-app.post('/api/events', async (req, res) => {
+const EVENT_TYPES = ['video_view', 'product_click', 'add_to_kit', 'source_redirect', 'feature_use', 'search'];
+const EVENT_FIELDS = ['type', 'ts', 'videoId', 'category', 'retailer', 'featureName', 'partner', 'value', 'metadata'];
+
+// Analytics reads: admins, verified partners, and paid creators (same gate as AdminDashboard)
+function requireAnalyticsAccess(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as any).user;
+  if (user?.isAdmin === true || user?.isVerifiedPartner === true || ['Plus', 'Pro', 'Studio'].includes(user?.subscriptionStatus)) {
+    return next();
+  }
+  return res.status(403).json({ error: "Not allowed" });
+}
+
+app.post('/api/events', loadUser, async (req, res) => {
   try {
+    const event = pickFields(req.body, EVENT_FIELDS);
+    if (!EVENT_TYPES.includes(event.type)) {
+      return res.status(400).json({ error: "Invalid event type" });
+    }
+    if (event.metadata !== undefined) {
+      try {
+        if (JSON.stringify(event.metadata).length > 2000) delete event.metadata;
+      } catch {
+        delete event.metadata;
+      }
+    }
+    event.id = crypto.randomUUID();
+    event.timestamp = new Date().toISOString();
+    event.userId = (req as any).user?.email?.toLowerCase() || null;
+
     const database = await getDb();
-    const result = await database.collection("events").insertOne(req.body);
-    res.json(result);
+    await database.collection("events").insertOne(event);
+    res.json({ success: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[POST /api/events]', e);
   }
 });
 
-app.get('/api/events', async (req, res) => {
+app.get('/api/events', requireAuth, requireAnalyticsAccess, async (req, res) => {
   try {
     const database = await getDb();
     const events = await database.collection("events")
@@ -1309,12 +1751,12 @@ app.get('/api/events', async (req, res) => {
       .toArray();
     res.json(events);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[GET /api/events]', e);
   }
 });
 
 // New: Purchases Collection
-app.get('/api/purchases', async (req, res) => {
+app.get('/api/purchases', requireAuth, requireAnalyticsAccess, async (req, res) => {
     try {
       const database = await getDb();
       const purchases = await database.collection("purchases")
@@ -1323,29 +1765,62 @@ app.get('/api/purchases', async (req, res) => {
         .toArray();
       res.json(purchases);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      sendServerError(res, '[GET /api/purchases]', e);
     }
 });
 
-app.post('/api/purchases', async (req, res) => {
+app.post('/api/purchases', requireAuth, async (req, res) => {
     try {
+      const purchase = pickFields(req.body, ['products', 'totalAmount', 'partner', 'videoId']);
+      if (purchase.products !== undefined && !Array.isArray(purchase.products)) {
+        return res.status(400).json({ error: "Invalid products" });
+      }
+      if (purchase.totalAmount !== undefined && (typeof purchase.totalAmount?.amount !== 'number' || typeof purchase.totalAmount?.currency !== 'string')) {
+        return res.status(400).json({ error: "Invalid total amount" });
+      }
+      purchase.id = crypto.randomUUID();
+      purchase.date = new Date().toISOString();
+      purchase.userId = (req as any).user.email.toLowerCase();
+
       const database = await getDb();
-      const result = await database.collection("purchases").insertOne(req.body);
-      res.json(result);
+      await database.collection("purchases").insertOne(purchase);
+      res.json({ success: true, id: purchase.id });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      sendServerError(res, '[POST /api/purchases]', e);
     }
 });
 
-app.delete('/api/videos/:id', async (req, res) => {
+app.delete('/api/videos/:id', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const reqUser = (req as any).user;
+    const id = Number(req.params.id);
     const database = await getDb();
-    const result = await database.collection("videos").deleteOne({ id: Number(id) });
-    res.json(result);
+    const video = await database.collection("videos").findOne({ id });
+    if (!video) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    const isOwner = typeof video.creatorId === 'string' && video.creatorId.toLowerCase() === reqUser.email.toLowerCase();
+    if (reqUser.isAdmin !== true && !isOwner) {
+      return res.status(403).json({ error: "Not allowed" });
+    }
+    await database.collection("videos").deleteOne({ id });
+    res.json({ success: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendServerError(res, '[DELETE /api/videos/:id]', e);
   }
+});
+
+// JSON error handler for body-parser and any error forwarded by Express.
+// Real errors are logged; clients only get a generic message.
+app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) return next(err);
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: "Request is too large." });
+  }
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: "Invalid JSON body." });
+  }
+  sendServerError(res, `[API Error] ${req.method} ${req.originalUrl}`, err);
 });
 
 // Vite middleware for development

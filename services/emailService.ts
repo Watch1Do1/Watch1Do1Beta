@@ -1,6 +1,18 @@
 
 import type { CartItem, Product } from "../types.js";
 
+// Escapes dynamic values (AI/eBay product data, titles, admin notes) before they go into email HTML.
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+// Subjects are plain text: no line breaks, max 200 chars (enforced by /api/email/send).
+const subjectLine = (value: string): string => value.replace(/[\r\n]+/g, ' ').trim().slice(0, 200);
+
 /**
  * Email Service (Resend Integration)
  * Dispatches 'Project Payloads' and 'Creator Notifications'
@@ -14,13 +26,17 @@ export const emailService = {
             body: JSON.stringify({
                 to: email,
                 subject: 'Project Hub Active - Watch1Do1',
-                html: `<h1>Project Confirmed: ${projectTitle}</h1>` // Minimal for now, can be expanded
+                html: `<h1>Project Confirmed: ${escapeHtml(projectTitle)}</h1>` // Minimal for now, can be expanded
             })
         });
-        return response.ok;
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Transmission failed (${response.status})`);
+        }
+        return true;
     } catch (e) {
         console.error("Email Error:", e);
-        return false;
+        throw e;
     }
   },
 
@@ -32,8 +48,8 @@ export const emailService = {
       
       const productList = products.map(p => `
         <li style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #1e293b;">
-          <strong style="color: #ffffff;">${p.name}</strong><br/>
-          <span style="font-size: 11px; color: #64748b;">${p.retailer} • $${p.price.amount.toFixed(2)}</span>
+          <strong style="color: #ffffff;">${escapeHtml(p.name)}</strong><br/>
+          <span style="font-size: 11px; color: #64748b;">${escapeHtml(p.retailer)} • $${p.price.amount.toFixed(2)}</span>
         </li>
       `).join('');
 
@@ -44,7 +60,7 @@ export const emailService = {
                 <p style="text-transform: uppercase; font-size: 9px; color: #475569; letter-spacing: 4px; margin-top: 8px; font-weight: 800;">Watch1Do1 Official Status</p>
             </div>
             
-            <p style="font-size: 14px; line-height: 1.6; color: #94a3b8;">Great news! Your video <strong>"${title}"</strong> has passed review and is now live in the global catalog.</p>
+            <p style="font-size: 14px; line-height: 1.6; color: #94a3b8;">Great news! Your video <strong>"${escapeHtml(title)}"</strong> has passed review and is now live in the global catalog.</p>
             
             <div style="background: #0f172a; padding: 25px; border-radius: 20px; margin: 30px 0; border: 1px solid #1e293b;">
                 <h2 style="font-size: 11px; text-transform: uppercase; color: #7D8FED; margin-top: 0; letter-spacing: 2px; font-weight: 900;">AI Identified Materials:</h2>
@@ -65,7 +81,7 @@ export const emailService = {
           const res = await fetch('/api/email/send', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ to: email, subject: `Project Hub Active: ${title}`, html })
+              body: JSON.stringify({ to: email, subject: subjectLine(`Project Hub Active: ${title}`), html })
           });
           if (!res.ok) {
               const errorData = await res.json().catch(() => ({}));
@@ -91,14 +107,14 @@ export const emailService = {
                 <p style="text-transform: uppercase; font-size: 9px; color: #475569; letter-spacing: 4px; margin-top: 8px; font-weight: 800;">Refinement Required</p>
             </div>
 
-            <p style="font-size: 14px; line-height: 1.6; color: #94a3b8;">Your submission <strong>"${title}"</strong> requires further refinement before it can be deployed to the catalog.</p>
+            <p style="font-size: 14px; line-height: 1.6; color: #94a3b8;">Your submission <strong>"${escapeHtml(title)}"</strong> requires further refinement before it can be deployed to the catalog.</p>
             
             <div style="background: #0f172a; padding: 25px; border-radius: 20px; margin: 30px 0; border: 2px solid #f43f5e20;">
                 <h2 style="font-size: 11px; text-transform: uppercase; color: #f43f5e; margin-top: 0; letter-spacing: 2px; font-weight: 900;">Flag Reason:</h2>
-                <p style="font-size: 16px; font-weight: 900; color: #ffffff; margin: 8px 0;">${reason}</p>
+                <p style="font-size: 16px; font-weight: 900; color: #ffffff; margin: 8px 0;">${escapeHtml(reason)}</p>
                 <div style="height: 1px; background: #1e293b; margin: 15px 0;"></div>
                 <h2 style="font-size: 11px; text-transform: uppercase; color: #64748b; margin-top: 0; letter-spacing: 2px; font-weight: 900;">Admin Feedback:</h2>
-                <p style="font-size: 13px; color: #94a3b8; line-height: 1.6;">${note}</p>
+                <p style="font-size: 13px; color: #94a3b8; line-height: 1.6;">${escapeHtml(note)}</p>
             </div>
 
             <p style="font-size: 13px; color: #64748b; line-height: 1.6; text-align: center;">
@@ -111,7 +127,7 @@ export const emailService = {
           const res = await fetch('/api/email/send', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ to: email, subject: `Project Revision Required: ${title}`, html })
+              body: JSON.stringify({ to: email, subject: subjectLine(`Project Revision Required: ${title}`), html })
           });
           if (!res.ok) {
               const errorData = await res.json().catch(() => ({}));
@@ -140,7 +156,7 @@ export const emailService = {
             <p style="font-size: 14px; line-height: 1.6; color: #94a3b8;">A security recovery request was initialized for your Maker Profile. Click the button below to synchronize a new access key.</p>
             
             <div style="text-align: center; margin: 40px 0;">
-                <a href="${resetLink}" style="background: #7D8FED; color: white; padding: 18px 32px; border-radius: 16px; text-decoration: none; font-weight: 900; text-transform: uppercase; font-size: 12px; letter-spacing: 2px; box-shadow: 0 10px 20px rgba(125, 143, 237, 0.2);">Reset Access Key</a>
+                <a href="${escapeHtml(resetLink)}" style="background: #7D8FED; color: white; padding: 18px 32px; border-radius: 16px; text-decoration: none; font-weight: 900; text-transform: uppercase; font-size: 12px; letter-spacing: 2px; box-shadow: 0 10px 20px rgba(125, 143, 237, 0.2);">Reset Access Key</a>
             </div>
  
             <div style="background: #0f172a; padding: 20px; border-radius: 12px; border: 1px solid #1e293b; margin-top: 20px;">
@@ -181,10 +197,10 @@ export const emailService = {
 
       const itemsHtml = items.map(i => `
         <div style="padding: 15px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; background: #0f172a;">
-            <img src="${i.imageUrl}" width="60" height="60" style="border-radius: 12px; margin-right: 15px; object-fit: cover; border: 1px solid #334155;" />
+            <img src="${escapeHtml(i.imageUrl)}" width="60" height="60" style="border-radius: 12px; margin-right: 15px; object-fit: cover; border: 1px solid #334155;" />
             <div style="flex-grow: 1;">
-                <div style="color: #ffffff; font-weight: 800; font-size: 14px; margin-bottom: 2px; font-family: sans-serif;">${i.name}</div>
-                <div style="color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-family: sans-serif;">${i.retailer} • Qty: ${i.quantity}</div>
+                <div style="color: #ffffff; font-weight: 800; font-size: 14px; margin-bottom: 2px; font-family: sans-serif;">${escapeHtml(i.name)}</div>
+                <div style="color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-family: sans-serif;">${escapeHtml(i.retailer)} • Qty: ${escapeHtml(i.quantity)}</div>
             </div>
             <div style="color: #7D8FED; font-weight: 900; font-size: 14px; font-family: sans-serif;">$${i.price.amount.toFixed(2)}</div>
         </div>
@@ -199,7 +215,7 @@ export const emailService = {
 
             <div style="background: #0f172a; padding: 30px; border-radius: 24px; margin-bottom: 30px; border: 1px solid #1e293b; text-align: center;">
                 <p style="text-transform: uppercase; font-size: 9px; color: #7D8FED; font-weight: 900; margin-bottom: 10px;">Project Hub Active</p>
-                <h2 style="font-size: 20px; font-weight: 900; margin: 0; color: #ffffff;">${title}</h2>
+                <h2 style="font-size: 20px; font-weight: 900; margin: 0; color: #ffffff;">${escapeHtml(title)}</h2>
             </div>
 
             <div style="border-radius: 20px; overflow: hidden; border: 1px solid #1e293b;">
@@ -224,7 +240,7 @@ export const emailService = {
           const res = await fetch('/api/email/send', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ to: email, subject: `Maker Payload Secured: ${title}`, html: htmlTemplate })
+              body: JSON.stringify({ to: email, subject: subjectLine(`Maker Payload Secured: ${title}`), html: htmlTemplate })
           });
           if (!res.ok) {
               const errorData = await res.json().catch(() => ({}));

@@ -28,6 +28,18 @@ const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
     ]);
 };
 
+// Client-side: turns a non-OK /api/ai/* response into an Error carrying the server's
+// user-facing message (e.g. "Sign in required", "Too many requests...", "AI is temporarily paused...").
+const readAiResponse = async (res: Response): Promise<any> => {
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    const err = new Error(data?.error || `AI request failed (${res.status})`);
+    err.name = 'ApiError';
+    throw err;
+  }
+  return res.json();
+};
+
 const safeParse = <T>(text: string | undefined, fallback: T): T => {
     if (!text) return fallback;
     try {
@@ -211,7 +223,7 @@ class ServerProxyChat {
     });
 
     if (!response.ok) {
-      throw new Error(`Chat failed with status ${response.status}`);
+      await readAiResponse(response);
     }
 
     const reader = response.body?.getReader();
@@ -256,7 +268,7 @@ export const generateProductsFromText = async (text: string, category?: ProjectC
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, category })
     });
-    return res.json();
+    return readAiResponse(res);
   }
 
   try {
@@ -296,7 +308,7 @@ export const generateProductsFromImages = async (base64Images: string[], mimeTyp
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ images: base64Images, mimeType, category })
     });
-    return res.json();
+    return readAiResponse(res);
   }
 
   try {
@@ -707,7 +719,7 @@ export const generateProductsFromUrl = async (url: string, category?: ProjectCat
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, category })
     });
-    return res.json();
+    return readAiResponse(res);
   }
 
   // Auto-detect eBay listings and fetch directly from eBay Browse API
@@ -1053,7 +1065,7 @@ export const generateComplementaryProducts = async (title: string, existing: Pro
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, existing, category })
     });
-    return res.json();
+    return readAiResponse(res);
   }
 
   try {
@@ -1077,7 +1089,7 @@ export const generateV3ProjectInsights = async (title: string, products: Product
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, products, category })
     });
-    return res.json();
+    return readAiResponse(res);
   }
 
   try {
@@ -1117,7 +1129,7 @@ export const searchSpecificProduct = async (query: string): Promise<Product[]> =
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query })
     });
-    return res.json();
+    return readAiResponse(res);
   }
 
   try {
@@ -1143,7 +1155,7 @@ export const revalidateProductAvailability = async (product: Product): Promise<P
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product })
     });
-    return res.json();
+    return readAiResponse(res);
   }
 
   try {
@@ -1183,7 +1195,7 @@ export const generateDeepDiveProducts = async (videoTitle: string, existing: Pro
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: videoTitle, existing, category })
         });
-        return res.json();
+        return readAiResponse(res);
     }
 
     try {
